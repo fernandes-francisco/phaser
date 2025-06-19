@@ -18,10 +18,11 @@ export default class GameScene extends Phaser.Scene {
         this.buildingCenters = [];
         this.dynamicSprites = [];
 
-        // MODIFIED: Removed sidewalkAreas
+        // Map layout arrays
         this.roadAreas = [];
-        this.grassAreas = [];
+        this.grassAreas = []; 
         this.intersectionAreas = [];
+        this.npcSpawnAreas = [];
 
         // Controls
         this.cursors = null;
@@ -114,20 +115,20 @@ export default class GameScene extends Phaser.Scene {
         this.onFootMusic.play();
     }
 
-    // MODIFIED: Reduced collider sizes for all buildings
+    // MODIFIED: Building colliders reduced even further for smoother gameplay
     setSpriteCollider(sprite, type) {
         switch (type) {
             case 'building_office': case 'building_apartment':
-                // Original: 180x480
-                sprite.body.setSize(160, 430).setOffset((sprite.width - 160) / 2, (sprite.height - 430) / 2);
+                // Original: 180x480 -> 120x360 -> 100x320
+                sprite.body.setSize(100, 320).setOffset((sprite.width - 100) / 2, (sprite.height - 320) / 2);
                 break;
             case 'building_commercial':
-                // Original: 480x220
-                sprite.body.setSize(430, 200).setOffset((sprite.width - 430) / 2, (sprite.height - 200) / 2);
+                // Original: 480x220 -> 360x160 -> 320x140
+                sprite.body.setSize(320, 140).setOffset((sprite.width - 320) / 2, (sprite.height - 140) / 2);
                 break;
             case 'building_residential': case 'building_house':
-                // Original: 230x230
-                sprite.body.setSize(200, 200).setOffset((sprite.width - 200) / 2, (sprite.height - 200) / 2);
+                // Original: 230x230 -> 160x160 -> 140x140
+                sprite.body.setSize(140, 140).setOffset((sprite.width - 140) / 2, (sprite.height - 140) / 2);
                 break;
             case 'car_red': case 'car_police': case 'truck_blue':
                 sprite.body.setSize(sprite.displayWidth * 0.9, sprite.displayHeight * 0.85);
@@ -143,10 +144,10 @@ export default class GameScene extends Phaser.Scene {
     }
 
     createCity() {
-        // MODIFIED: Removed sidewalkAreas
         this.roadAreas = [];
         this.grassAreas = [];
         this.intersectionAreas = [];
+        this.npcSpawnAreas = [];
         this.buildingCenters = [];
         this.buildings = this.physics.add.staticGroup();
         this.createCityBlocks();
@@ -154,8 +155,8 @@ export default class GameScene extends Phaser.Scene {
 
     createCityBlocks() {
         this.createProperStreets();
-        this.buildInMedians();
-        this.createCityDistricts();
+        this.createCityDistricts(); 
+        this.buildInMedians();     
     }
 
     createProperStreets() {
@@ -179,7 +180,7 @@ export default class GameScene extends Phaser.Scene {
         this.createStreet(0, topRoadY, this.worldWidth, mainRoadWidth, true);
         this.createStreet(0, bottomRoadY, this.worldWidth, mainRoadWidth, true);
         const horizontalMedian = new Phaser.Geom.Rectangle(0, topRoadY + mainRoadWidth, this.worldWidth, medianWidth);
-        this.grassAreas.push(horizontalMedian);
+        this.grassAreas.push(horizontalMedian); 
 
         const leftRoadX = this.worldWidth / 2 - medianWidth / 2 - mainRoadWidth;
         const rightRoadX = this.worldWidth / 2 + medianWidth / 2;
@@ -202,8 +203,6 @@ export default class GameScene extends Phaser.Scene {
             }
         }
         this.createIntersections();
-        // REMOVED: No longer creating sidewalks for streets
-        // this.createSidewalksForStreet(x, y, width, height, isHorizontal);
     }
 
     createIntersections() {
@@ -218,10 +217,6 @@ export default class GameScene extends Phaser.Scene {
             }
         }
     }
-
-    // REMOVED: Sidewalk functions are no longer needed
-    // createSidewalksForStreet(...)
-    // createSidewalk(...)
 
     buildInMedians() {
         this.grassAreas.forEach(median => {
@@ -238,8 +233,19 @@ export default class GameScene extends Phaser.Scene {
     }
 
     createCityDistricts() {
-        const districts = [{ x: 50, y: 50, width: 400, height: 400, type: 'residential', density: 1.0 }, { x: this.worldWidth - 450, y: 50, width: 400, height: 400, type: 'residential', density: 1.0 }, { x: 50, y: this.worldHeight - 450, width: 400, height: 400, type: 'residential', density: 1.0 }, { x: this.worldWidth - 450, y: this.worldHeight - 450, width: 400, height: 400, type: 'residential', density: 1.0 }, { x: 100, y: this.worldHeight / 2 - 150, width: 300, height: 300, type: 'commercial', density: 1.0 }, { x: this.worldWidth - 400, y: this.worldHeight / 2 - 150, width: 300, height: 300, type: 'commercial', density: 1.0 }, ];
-        districts.forEach(d => this.buildDistrict(d));
+        const districts = [
+            { x: 50, y: 50, width: 400, height: 400, type: 'residential', density: 1.0 }, 
+            { x: this.worldWidth - 450, y: 50, width: 400, height: 400, type: 'residential', density: 1.0 }, 
+            { x: 50, y: this.worldHeight - 450, width: 400, height: 400, type: 'residential', density: 1.0 }, 
+            { x: this.worldWidth - 450, y: this.worldHeight - 450, width: 400, height: 400, type: 'residential', density: 1.0 }, 
+            { x: 100, y: this.worldHeight / 2 - 150, width: 300, height: 300, type: 'commercial', density: 1.0 }, 
+            { x: this.worldWidth - 400, y: this.worldHeight / 2 - 150, width: 300, height: 300, type: 'commercial', density: 1.0 }, 
+        ];
+
+        districts.forEach(d => {
+            this.npcSpawnAreas.push(new Phaser.Geom.Rectangle(d.x, d.y, d.width, d.height));
+            this.buildDistrict(d);
+        });
     }
 
     buildDistrict(district) {
@@ -267,9 +273,6 @@ export default class GameScene extends Phaser.Scene {
         }
         return false;
     }
-    
-    // REMOVED: No longer needed
-    // isAreaOnSidewalk(...)
 
     isInIntersection(x, y) {
         for (let i of this.intersectionAreas) {
@@ -306,6 +309,7 @@ export default class GameScene extends Phaser.Scene {
         this.player.body.setDrag(400).setMaxVelocity(180);
         this.player.maxHealth = 100;
         this.player.money = 0;
+        this.player.isDying = false;
         this.dynamicSprites.push(this.player);
     }
 
@@ -335,58 +339,59 @@ export default class GameScene extends Phaser.Scene {
         }
     }
 
-    // MODIFIED: Reworked NPC generation to prevent clumping
     createNPCs() {
-        const walkableAreas = this.grassAreas;
+        const walkableAreas = this.npcSpawnAreas;
         if (walkableAreas.length === 0) return;
+        
         const npcCount = 80;
-        const minNpcDistance = 30; // Min distance between NPCs
-        const maxRetries = 20;     // Prevent infinite loops
+        const minNpcDistance = 30;
+        const maxRetriesPerNpc = 20;
 
-        for (let i = 0; i < npcCount; i++) {
-            let validPosition = false;
-            let x, y;
-            let retries = 0;
+        let totalWalkableArea = 0;
+        walkableAreas.forEach(area => {
+            totalWalkableArea += area.width * area.height;
+        });
 
-            while (!validPosition && retries < maxRetries) {
-                const spawnArea = Phaser.Utils.Array.GetRandom(walkableAreas);
-                x = Phaser.Math.Between(spawnArea.left, spawnArea.right);
-                y = Phaser.Math.Between(spawnArea.top, spawnArea.bottom);
-                
-                validPosition = true; // Assume true until a check fails
+        if (totalWalkableArea === 0) return;
 
-                // Check 1: Distance from player
-                if (Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y) < 300) {
-                    validPosition = false;
-                    retries++;
-                    continue;
-                }
+        let npcsCreated = 0;
 
-                // Check 2: Distance from other NPCs
-                for (const existingNpc of this.npcs.children.entries) {
-                    if (Phaser.Math.Distance.Between(x, y, existingNpc.x, existingNpc.y) < minNpcDistance) {
-                        validPosition = false;
-                        break; // Exit inner for-loop
+        walkableAreas.forEach(area => {
+            const areaRatio = (area.width * area.height) / totalWalkableArea;
+            const npcsToSpawnInThisArea = Math.round(areaRatio * npcCount);
+
+            for (let i = 0; i < npcsToSpawnInThisArea && npcsCreated < npcCount; i++) {
+                let validPosition = false;
+                let x, y;
+                let retries = 0;
+
+                while (!validPosition && retries < maxRetriesPerNpc) {
+                    x = Phaser.Math.Between(area.left, area.right);
+                    y = Phaser.Math.Between(area.top, area.bottom);
+                    
+                    validPosition = true;
+
+                    for (const existingNpc of this.npcs.children.entries) {
+                        if (Phaser.Math.Distance.Between(x, y, existingNpc.x, existingNpc.y) < minNpcDistance) {
+                            validPosition = false;
+                            break;
+                        }
                     }
+                    if (!validPosition) retries++;
                 }
-                
-                if (!validPosition) {
-                    retries++;
-                }
-            }
 
-            if (validPosition) {
-                const npc = this.physics.add.sprite(x, y, 'npc');
-                npc.setScale(0.05);
-                this.setSpriteCollider(npc, 'npc');
-                npc.setTint(Phaser.Math.Between(0x888888, 0xffffff));
-                Object.assign(npc, { walkDirection: Math.random() * Math.PI * 2, walkSpeed: 30 + Math.random() * 20, changeDirectionTimer: 0, panicMode: false, panicTimer: 0 });
-                this.npcs.add(npc);
-                this.dynamicSprites.push(npc);
-            } else {
-                console.warn(`Could not find a valid position for NPC #${i} after ${maxRetries} retries.`);
+                if (validPosition) {
+                    const npc = this.physics.add.sprite(x, y, 'npc');
+                    npc.setScale(0.05);
+                    this.setSpriteCollider(npc, 'npc');
+                    npc.setTint(Phaser.Math.Between(0x888888, 0xffffff));
+                    Object.assign(npc, { walkDirection: Math.random() * Math.PI * 2, walkSpeed: 30 + Math.random() * 20, changeDirectionTimer: 0, panicMode: false, panicTimer: 0 });
+                    this.npcs.add(npc);
+                    this.dynamicSprites.push(npc);
+                    npcsCreated++;
+                }
             }
-        }
+        });
     }
 
     updateDepthSorting() {
@@ -582,7 +587,6 @@ export default class GameScene extends Phaser.Scene {
         this.npcs.children.each(n => {
             if (!n.active) return;
             
-            // If an NPC is on a road or intersection for any reason, rescue them
             if (this.isAreaOnRoad(n.getBounds()) || this.isInIntersection(n.x, n.y)) {
                 this.teleportNPCToSafety(n);
                 return;
@@ -591,7 +595,6 @@ export default class GameScene extends Phaser.Scene {
             const nextX = n.x + Math.cos(n.walkDirection) * n.walkSpeed * 0.016;
             const nextY = n.y + Math.sin(n.walkDirection) * n.walkSpeed * 0.016;
             
-            // MODIFIED: Check against roads and intersections before moving (sidewalk check removed)
             const nextPosRect = new Phaser.Geom.Rectangle(nextX -1, nextY -1, 2, 2);
             if (this.isAreaOnRoad(nextPosRect) || this.isInIntersection(nextX, nextY)) {
                 n.walkDirection = Math.random() * Math.PI * 2; 
@@ -615,7 +618,7 @@ export default class GameScene extends Phaser.Scene {
     }
 
     teleportNPCToSafety(npc) {
-        const walkableAreas = this.grassAreas;
+        const walkableAreas = this.npcSpawnAreas;
         if(walkableAreas.length === 0) return;
 
         let nearestArea = null;
@@ -723,9 +726,42 @@ export default class GameScene extends Phaser.Scene {
         this.vehicles.forEach(v => { if (v.active && v !== this.currentVehicle && Phaser.Math.Distance.Between(x, y, v.x, v.y) < 100) this.hitVehicle(v, 50); });
     }
 
-    updateUI() { const hP = Math.max(0, this.playerHealth / this.player.maxHealth); this.gameUI.healthBar.setScale(hP, 1); if (hP > 0.6) this.gameUI.healthBar.setFillStyle(0x00ff00); else if (hP > 0.3) this.gameUI.healthBar.setFillStyle(0xffff00); else this.gameUI.healthBar.setFillStyle(0xff0000); for (let i = 0; i < 5; i++) { this.gameUI.wantedStars[i].setColor(i < this.wantedLevel ? '#ff0000' : '#333333'); } this.gameUI.moneyText.setText(`$${this.playerMoney}`); const cO = this.playerInVehicle ? this.currentVehicle : this.player; const s = Math.round(cO.body.velocity.length()); this.gameUI.speedText.setText(this.playerInVehicle ? `${this.currentVehicle.type.replace('_', ' ').toUpperCase()} - Speed: ${s}` : 'ON FOOT'); this.gameUI.missionText.setText(this.currentMission && !this.currentMission.completed ? `MISSION: ${this.currentMission.description}` : 'No active missions'); const w = this.weapons[this.currentWeapon]; this.gameUI.weaponText.setText(`${w.name}: ${w.ammo}/${w.maxAmmo}`); this.updateMinimap(); }
-    updateMinimap() { const mS = 150; const wS = mS / Math.max(this.worldWidth, this.worldHeight); const { width } = this.sys.game.config; const pP = this.playerInVehicle ? this.currentVehicle : this.player; this.gameUI.minimapPlayer.setPosition((width - mS - 10) + (pP.x * wS) - mS / 2, (mS / 2 + 10) + (pP.y * wS) - mS / 2); }
-    update() { this.handleMovement(); this.updatePolice(); this.handleAutomaticFire(); this.checkMissionProgress(); this.updateUI(); this.updateDepthSorting(); }
+    updateUI() { 
+        if (!this.player.active) return;
+        const hP = Math.max(0, this.playerHealth / this.player.maxHealth); 
+        this.gameUI.healthBar.setScale(hP, 1); 
+        if (hP > 0.6) this.gameUI.healthBar.setFillStyle(0x00ff00); 
+        else if (hP > 0.3) this.gameUI.healthBar.setFillStyle(0xffff00); 
+        else this.gameUI.healthBar.setFillStyle(0xff0000); 
+        for (let i = 0; i < 5; i++) { this.gameUI.wantedStars[i].setColor(i < this.wantedLevel ? '#ff0000' : '#333333'); } 
+        this.gameUI.moneyText.setText(`$${this.playerMoney}`); 
+        const cO = this.playerInVehicle ? this.currentVehicle : this.player; 
+        const s = Math.round(cO.body.velocity.length()); 
+        this.gameUI.speedText.setText(this.playerInVehicle ? `${this.currentVehicle.type.replace('_', ' ').toUpperCase()} - Speed: ${s}` : 'ON FOOT'); 
+        this.gameUI.missionText.setText(this.currentMission && !this.currentMission.completed ? `MISSION: ${this.currentMission.description}` : 'No active missions'); 
+        const w = this.weapons[this.currentWeapon]; this.gameUI.weaponText.setText(`${w.name}: ${w.ammo}/${w.maxAmmo}`); 
+        this.updateMinimap(); 
+    }
+    
+    updateMinimap() { 
+        if (!this.player.active) return;
+        const mS = 150; 
+        const wS = mS / Math.max(this.worldWidth, this.worldHeight); 
+        const { width } = this.sys.game.config; 
+        const pP = this.playerInVehicle ? this.currentVehicle : this.player; 
+        this.gameUI.minimapPlayer.setPosition((width - mS - 10) + (pP.x * wS) - mS / 2, (mS / 2 + 10) + (pP.y * wS) - mS / 2); 
+    }
+    
+    update() { 
+        if (this.player.isDying) return;
+        this.handleMovement(); 
+        this.updatePolice(); 
+        this.handleAutomaticFire(); 
+        this.checkMissionProgress(); 
+        this.updateUI(); 
+        this.updateDepthSorting(); 
+    }
+
     handleAutomaticFire() { if (this.isAutoFiring && !this.playerInVehicle) { const w = this.weapons[this.currentWeapon]; if (w.automatic) { if (this.autoFireTarget) this.shoot(this.autoFireTarget.x, this.autoFireTarget.y); else this.shootForward(); } } }
     handleMovement() { if (this.playerInVehicle) this.handleVehicleMovement(this.currentVehicle); else this.handlePlayerMovement(this.player); }
     handlePlayerMovement(p) { let vX = 0, vY = 0; const s = 180; if (this.wasdKeys.W.isDown) vY = -s; if (this.wasdKeys.S.isDown) vY = s; if (this.wasdKeys.A.isDown) vX = -s; if (this.wasdKeys.D.isDown) vX = s; if (vX !== 0 && vY !== 0) { vX *= 0.707; vY *= 0.707; } p.body.setVelocity(vX, vY); if (vX !== 0 || vY !== 0) p.rotation = Math.atan2(vY, vX) + Math.PI / 2; }
@@ -764,10 +800,14 @@ export default class GameScene extends Phaser.Scene {
     }
 
     damagePlayer(d) {
+        if (this.player.isDying) return;
         this.playerHealth = Math.max(0, this.playerHealth - d);
         this.cameras.main.flash(200, 255, 0, 0, false);
-        if (this.playerHealth <= 0) this.gameOver();
         this.updateUI();
+        if (this.playerHealth <= 0) {
+            this.player.isDying = true;
+            this.gameOver();
+        }
     }
 
     createBloodEffect(x, y) {
@@ -803,28 +843,10 @@ export default class GameScene extends Phaser.Scene {
     }
 
     gameOver() {
-        this.showNotification("WASTED!", '#ff0000');
         this.sound.stopAll();
-
-        this.time.delayedCall(3000, () => {
-            this.playerHealth = 100;
-            this.wantedLevel = 0;
-            this.playerMoney = Math.max(0, this.playerMoney - 500);
-
-            if (this.playerInVehicle) {
-                this.exitVehicle(); 
-            } else {
-                if (!this.onFootMusic.isPlaying) this.onFootMusic.play();
-            }
-
-            this.player.setPosition(960, 960).body.setVelocity(0, 0);
-            this.player.setVisible(true);
-            this.policeCars.forEach(c => { const i = this.vehicles.indexOf(c); if (i > -1) this.vehicles.splice(i, 1); if (c.active) c.destroy(); });
-            this.policeCars = [];
-            this.weapons.forEach(w => { w.ammo = w.maxAmmo; });
-            this.currentWeapon = 0;
-            this.updateUI();
-            this.showNotification("Respawned at hospital - $500 fine", '#ffff00');
+        this.cameras.main.fadeOut(1500, 0, 0, 0);
+        this.cameras.main.once('camerafadeoutcomplete', () => {
+            this.scene.start('GameOverScene');
         });
     }
 }
