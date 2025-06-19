@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GTA City - 2D Open World Game</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <script type="module" src="main.js"></script>
+    <script type="module" src="preload.js"></script>
+    <script type="module" src="GameScene.js"></script>
+    <script type="module" src="LoadingScene.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #1a1a1a 0%, #2c1810 50%, #1a1a1a 100%);
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+            min-height: 100vh;
+        }
+
+        #game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        #game-title {
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: bold;
+            background: linear-gradient(45deg, #ff6b35, #ff9500, #ffaa00);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            margin-bottom: 20px;
+            text-align: center;
+            letter-spacing: 2px;
+        }
+
+        #game-subtitle {
+            font-size: 1.2rem;
+            color: #ccc;
+            margin-bottom: 30px;
+            text-align: center;
+            font-style: italic;
+        }
+
+        #game-canvas {
+            border: 3px solid;
+            border-image: linear-gradient(45deg, #ff6b35, #ff9500) 1;
+            box-shadow: 
+                0 0 20px rgba(255, 107, 53, 0.4),
+                inset 0 0 20px rgba(0,0,0,0.2);
+            border-radius: 12px;
+            background: #000;
+        }
+
+        #game-info {
+            margin-top: 25px;
+            text-align: center;
+            background: rgba(0,0,0,0.8);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #333;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            backdrop-filter: blur(10px);
+            max-width: 800px;
+        }
+
+        #controls {
+            font-size: 0.95rem;
+            color: #ddd;
+            line-height: 1.6;
+        }
+
+        .control-section {
+            margin: 8px 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .key {
+            background: linear-gradient(135deg, #333, #555);
+            color: #ff6b35;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-weight: bold;
+            border: 1px solid #666;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            min-width: 30px;
+            text-align: center;
+        }
+
+        .control-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #game-description {
+            margin-top: 15px;
+            padding: 15px;
+            background: linear-gradient(135deg, rgba(255, 107, 53, 0.1), rgba(255, 149, 0, 0.1));
+            border-radius: 8px;
+            border-left: 4px solid #ff6b35;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 1000;
+            background: rgba(0,0,0,0.9);
+            padding: 30px;
+            border-radius: 12px;
+            border: 2px solid #ff6b35;
+        }
+
+        .loader {
+            border: 4px solid #333;
+            border-top: 4px solid #ff6b35;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: #ff6b35;
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+
+        @media (max-width: 768px) {
+            #game-canvas {
+                width: 95vw !important;
+                height: auto !important;
+            }
+            
+            .control-section {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .control-item {
+                justify-content: center;
+            }
+        }
+
+        @media (max-width: 480px) {
+            #game-info {
+                padding: 15px;
+            }
+            
+            #controls {
+                font-size: 0.85rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    
+    <div id="game-container">
+        <h1 id="game-title">GTA CITY</h1>
+        <p id="game-subtitle">Open World Crime Simulator</p>
+        
+        <div id="loading">
+            <div class="loader"></div>
+            <p class="loading-text">Loading Game Assets...</p>
+            <p style="color: #ccc; margin-top: 10px;">Preparing your criminal adventure...</p>
+        </div>
+
+        <div id="game-canvas"></div>
+        
+        <div id="game-info">
+            <div id="controls">
+                <div class="control-section">
+                    <div class="control-item">
+                        <span class="key">W A S D</span>
+                        <span>Move Character / Drive Vehicle</span>
+                    </div>
+                    <div class="control-item">
+                        <span class="key">E</span>
+                        <span>Enter/Exit Vehicle</span>
+                    </div>
+                </div>
+                <div class="control-section">
+                    <div class="control-item">
+                        <span class="key">SPACE</span>
+                        <span>Handbrake (Vehicles)</span>
+                    </div>
+                    <div class="control-item">
+                        <span class="key">R</span>
+                        <span>Reset Wanted Level</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="game-description">
+                <strong style="color: #ff6b35;">🚗 Welcome to GTA City!</strong><br>
+                Explore the open world, steal cars, evade police, and complete missions. 
+                Your wanted level increases when you commit crimes - the more stars you have, 
+                the more aggressive the police become. Can you survive in this criminal underworld?
+            </div>
+        </div>
+    </div>
+    
+</body>
+</html>
