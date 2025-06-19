@@ -11,11 +11,14 @@ export default class PreloadScene extends Phaser.Scene {
     this.load.image('building_office', 'assets/building_office_new.png');
     this.load.image('building_residential', 'assets/building_residential_new.png');
     this.load.image('building_commercial', 'assets/building_commercial_new.png');
-    this.load.image('building_house', 'assets/building_house.png');
+    this.load.image('building_house', 'assets/building_residential_new.png');
     this.load.image('building_apartment', 'assets/building_apartment_new.png');
+    this.load.image('grass', 'assets/grass.png');
     this.load.image('sidewalk', 'assets/sidewalk.png');
     this.load.image('road', 'assets/road.png');
     this.load.image('npc', 'assets/npc.png');
+    this.load.audio('danzakuduro', 'assets/Don Omar - Danza Kuduro (Lyrics) ft. Lucenzo.mp3');
+    this.load.audio('sovietconnection', 'assets/GTA IV - Soviet Connection (New mixed Intro).mp3');
   }
 
   create() {

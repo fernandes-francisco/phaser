@@ -1,2031 +1,830 @@
 import PreloadScene from './preload.js'
+
 export default class GameScene extends Phaser.Scene {
-            constructor() {
-                super({ key: 'GameScene' });
-                
-                // Game state
-                this.player = null;
-                this.vehicles = [];
-                this.npcs = [];
-                this.policeCars = [];
-                this.buildings = [];
-                this.missions = [];
-                this.bullets = [];
-                this.muzzleFlashes = [];
-                
-                // Controls
-                this.cursors = null;
-                this.wasdKeys = null;
-                
-                // Player state
-                this.playerInVehicle = false;
-                this.currentVehicle = null;
-                this.wantedLevel = 0;
-                this.playerHealth = 100;
-                this.playerMoney = 0;
-                this.lastCrimeTime = 0;
-                
-                // Weapon system
-                this.currentWeapon = 0;
-                this.weapons = [
-                    {name: "Pistol", damage: 25, ammo: 50, maxAmmo: 50, fireRate: 400, spread: 0.05, pelletsPerShot: 1},
-                    {name: "SMG", damage: 15, ammo: 100, maxAmmo: 100, fireRate: 120, spread: 0.15, pelletsPerShot: 1, automatic: true},
-                    {name: "Shotgun", damage: 35, ammo: 20, maxAmmo: 20, fireRate: 900, spread: 0.4, pelletsPerShot: 5}
-                ];
-                this.lastShotTime = 0;
-                this.isAutoFiring = false;
-                
-                // Mission state
-                this.currentMission = null;
-                this.missionTarget = null;
-                
-                // UI elements
-                this.gameUI = {};
-                
-                // Game world size - smaller for better city feel
-                this.worldWidth = 1920;
-                this.worldHeight = 1920;
-            }
-
-            create() {
-                // Set world bounds
-                this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
-                
-                // Create city environment
-                this.createCity();
-                
-                // Create player
-                this.createPlayer();
-                
-                // Create vehicles
-                this.createVehicles();
-                
-                // Create NPCs
-                this.createNPCs();
-                
-                // Setup controls
-                this.setupControls();
-                
-                // Create UI
-                this.createUI();
-                
-                // Setup camera
-                this.cameras.main.setBounds(0, 0, this.worldWidth, this.worldHeight);
-                this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
-                this.cameras.main.setDeadzone(50, 50);
-                
-                // Initialize missions
-                this.createMissions();
-                
-                // Game mechanics timers
-                this.setupTimers();
-            }
-
-            createCity() {
-                // Store map data for minimap and NPC pathfinding
-                this.mapData = [];
-                this.sidewalkAreas = [];
-                this.roadAreas = [];
-                this.intersectionAreas = [];
-                this.placedObjects = []; // Track all placed objects to prevent overlap
-                
-                // Create a proper designed city layout
-                this.createCityBlocks();
-            }
-
-            createCityBlocks() {
-                // Create a proper city with designed street layout
-                this.createProperStreets();
-                this.createCityDistricts();
-                this.createNaturalAreas();
-            }
-
-            createProperStreets() {
-                const roadWidth = 50;
-                
-                // Main avenue (horizontal through center)
-                this.createStreet(0, this.worldHeight/2 - roadWidth/2, this.worldWidth, roadWidth, true);
-                
-                // Main street (vertical through center)  
-                this.createStreet(this.worldWidth/2 - roadWidth/2, 0, roadWidth, this.worldHeight, false);
-                
-                // FEWER secondary streets (reduce road density)
-                // Secondary streets (horizontal) - much fewer
-                for (let y = 400; y < this.worldHeight; y += 600) {
-                    if (Math.abs(y - this.worldHeight/2) > 150) { // Skip near main avenue
-                        this.createStreet(0, y, this.worldWidth, 35, true);
-                    }
-                }
-                
-                // Secondary streets (vertical) - much fewer
-                for (let x = 400; x < this.worldWidth; x += 600) {
-                    if (Math.abs(x - this.worldWidth/2) > 150) { // Skip near main street
-                        this.createStreet(x, 0, 35, this.worldHeight, false);
-                    }
-                }
-            }
-
-            createStreet(x, y, width, height, isHorizontal) {
-                // Street surface
-                const street = this.add.rectangle(x, y, width, height, 0x333333);
-                street.setOrigin(0, 0);
-                this.roadAreas.push({x: x, y: y, width: width, height: height});
-                
-                // ALWAYS add center line for every road
-                if (isHorizontal && width > height) {
-                    // Horizontal road - dashed yellow center line
-                    for (let i = x; i < x + width; i += 30) {
-                        const lineSegment = this.add.rectangle(i, y + height/2 - 1, 15, 2, 0xffff00);
-                        lineSegment.setOrigin(0, 0);
-                    }
-                } else if (!isHorizontal && height > width) {
-                    // Vertical road - dashed yellow center line
-                    for (let i = y; i < y + height; i += 30) {
-                        const lineSegment = this.add.rectangle(x + width/2 - 1, i, 2, 15, 0xffff00);
-                        lineSegment.setOrigin(0, 0);
-                    }
-                }
-                
-                // Create intersections where roads cross
-                this.createIntersections(x, y, width, height, isHorizontal);
-                
-                // Sidewalks (but not in intersection areas)
-                const sidewalkWidth = 15;
-                if (isHorizontal) {
-                    // Top and bottom sidewalks
-                    this.createSidewalk(x, y - sidewalkWidth, width, sidewalkWidth);
-                    this.createSidewalk(x, y + height, width, sidewalkWidth);
-                } else {
-                    // Left and right sidewalks  
-                    this.createSidewalk(x - sidewalkWidth, y, sidewalkWidth, height);
-                    this.createSidewalk(x + width, y, sidewalkWidth, height);
-                }
-            }
-
-            createIntersections(x, y, width, height, isHorizontal) {
-                // Find where this road intersects with other roads
-                for (let otherRoad of this.roadAreas) {
-                    if (this.roadsIntersect(x, y, width, height, otherRoad)) {
-                        // Create intersection area
-                        const intersectX = Math.max(x, otherRoad.x);
-                        const intersectY = Math.max(y, otherRoad.y);
-                        const intersectWidth = Math.min(x + width, otherRoad.x + otherRoad.width) - intersectX;
-                        const intersectHeight = Math.min(y + height, otherRoad.y + otherRoad.height) - intersectY;
-                        
-                        if (intersectWidth > 30 && intersectHeight > 30) {
-                            // Use simple intersection asset (just road color with center lines)
-                            const intersection = this.add.sprite(
-                                intersectX + intersectWidth/2, 
-                                intersectY + intersectHeight/2, 
-                                'intersection'
-                            );
-                            intersection.setOrigin(0.5, 0.5);
-                            intersection.setDisplaySize(intersectWidth, intersectHeight);
-                            
-                            // Store intersection area to prevent sidewalks here
-                            this.intersectionAreas = this.intersectionAreas || [];
-                            this.intersectionAreas.push({
-                                x: intersectX, 
-                                y: intersectY, 
-                                width: intersectWidth, 
-                                height: intersectHeight
-                            });
-                        }
-                    }
-                }
-            }
-
-            roadsIntersect(x1, y1, w1, h1, road2) {
-                return !(x1 + w1 < road2.x || road2.x + road2.width < x1 || 
-                        y1 + h1 < road2.y || road2.y + road2.height < y1);
-            }
-
-            createSidewalk(x, y, width, height) {
-                // Don't create sidewalk if it overlaps with an intersection
-                if (this.intersectionAreas) {
-                    for (let intersection of this.intersectionAreas) {
-                        if (this.rectanglesOverlap(x, y, width, height, 
-                                                 intersection.x, intersection.y, 
-                                                 intersection.width, intersection.height)) {
-                            return; // Skip this sidewalk
-                        }
-                    }
-                }
-                
-                const sidewalk = this.add.rectangle(x, y, width, height, 0xcccccc);
-                sidewalk.setOrigin(0, 0);
-                this.sidewalkAreas.push({x: x, y: y, width: width, height: height});
-            }
-
-            rectanglesOverlap(x1, y1, w1, h1, x2, y2, w2, h2) {
-                return !(x1 + w1 < x2 || x2 + w2 < x1 || y1 + h1 < y2 || y2 + h2 < y1);
-            }
-
-            createCityDistricts() {
-                // Define city districts with specific building types
-                const districts = [
-                    // Downtown (center)
-                    {x: this.worldWidth/2 - 200, y: this.worldHeight/2 - 200, width: 400, height: 400, type: 'downtown', density: 0.6},
-                    // Residential areas
-                    {x: 50, y: 50, width: 400, height: 400, type: 'residential', density: 0.3},
-                    {x: this.worldWidth - 450, y: 50, width: 400, height: 400, type: 'residential', density: 0.3},
-                    {x: 50, y: this.worldHeight - 450, width: 400, height: 400, type: 'residential', density: 0.3},
-                    {x: this.worldWidth - 450, y: this.worldHeight - 450, width: 400, height: 400, type: 'residential', density: 0.3},
-                    // Commercial strips
-                    {x: 100, y: this.worldHeight/2 - 100, width: 300, height: 200, type: 'commercial', density: 0.4},
-                    {x: this.worldWidth - 400, y: this.worldHeight/2 - 100, width: 300, height: 200, type: 'commercial', density: 0.4}
-                ];
-                
-                districts.forEach(district => {
-                    this.buildDistrict(district);
-                });
-            }
-
-            buildDistrict(district) {
-                const blockSize = 80;
-                
-                for (let x = district.x; x < district.x + district.width; x += blockSize + 30) {
-                    for (let y = district.y; y < district.y + district.height; y += blockSize + 30) {
-                        // UNIVERSAL ROAD AVOIDANCE - check multiple points to ensure nothing spawns on roads
-                        if (this.isAreaOnRoad(x, y, blockSize, blockSize)) continue;
-                        
-                        if (Math.random() < district.density) {
-                            let buildingType;
-                            switch(district.type) {
-                                case 'downtown':
-                                    buildingType = Math.random() < 0.8 ? 'building_office' : 'building_commercial';
-                                    break;
-                                case 'residential':
-                                    buildingType = Math.random() < 0.7 ? 'building_residential' : 'building_house';
-                                    break;
-                                case 'commercial':
-                                    buildingType = 'building_commercial';
-                                    break;
-                            }
-                            this.createProperBuilding(x, y, blockSize, buildingType);
-                        }
-                    }
-                }
-            }
-
-            // Universal function to prevent ANYTHING from spawning on roads
-            isAreaOnRoad(x, y, width, height) {
-                // Check multiple points within the area to ensure no overlap with roads
-                const checkPoints = [
-                    {x: x, y: y}, // Top-left
-                    {x: x + width, y: y}, // Top-right
-                    {x: x, y: y + height}, // Bottom-left
-                    {x: x + width, y: y + height}, // Bottom-right
-                    {x: x + width/2, y: y + height/2}, // Center
-                ];
-                
-                for (let point of checkPoints) {
-                    if (this.isOnRoad(point.x, point.y)) {
-                        return true;
-                    }
-                }
-                return false;
-            }
-
-            isOnRoad(x, y) {
-                for (let road of this.roadAreas) {
-                    if (x >= road.x && x <= road.x + road.width && 
-                        y >= road.y && y <= road.y + road.height) {
-                        return true;
-                    }
-                }
-                return false;
-            }
-
-            createNaturalAreas() {
-                // Add trees along streets
-                this.addStreetTrees();
-                
-                // Add grass areas
-                this.addGrassAreas();
-            }
-
-            addStreetTrees() {
-                // Trees placed carefully to avoid ALL roads
-                for (let x = 80; x < this.worldWidth; x += 120) {
-                    for (let y = 80; y < this.worldHeight; y += 120) {
-                        // STRICT ROAD AVOIDANCE - check area around tree placement
-                        if (!this.isAreaOnRoad(x - 15, y - 15, 30, 30)) {
-                            if (Math.random() < 0.4) {
-                                this.createTree(x, y);
-                            }
-                        }
-                    }
-                }
-            }
-
-            isNearSidewalk(x, y) {
-                for (let sidewalk of this.sidewalkAreas) {
-                    const distance = Math.min(
-                        Math.abs(x - sidewalk.x),
-                        Math.abs(x - (sidewalk.x + sidewalk.width)),
-                        Math.abs(y - sidewalk.y),
-                        Math.abs(y - (sidewalk.y + sidewalk.height))
-                    );
-                    if (distance < 30) return true;
-                }
-                return false;
-            }
-
-            createTree(x, y) {
-                const treeSize = 25; // Approximate tree size for overlap checking
-                
-                // Check for overlap with existing objects
-                if (this.checkObjectOverlap(x - treeSize/2, y - treeSize/2, treeSize, treeSize)) {
-                    return; // Don't place tree if it overlaps
-                }
-                
-                // Tree trunk
-                const trunk = this.add.rectangle(x, y + 8, 8, 16, 0x8B4513);
-                trunk.setOrigin(0.5, 1);
-                
-                // Tree crown
-                const crown = this.add.circle(x, y, 12 + Math.random() * 8, 0x228B22);
-                
-                // Register this tree as a placed object
-                this.placedObjects.push({x: x - treeSize/2, y: y - treeSize/2, width: treeSize, height: treeSize, type: 'tree'});
-            }
-
-            checkObjectOverlap(x, y, width, height) {
-                for (let obj of this.placedObjects) {
-                    if (this.rectanglesOverlap(x, y, width, height, obj.x, obj.y, obj.width, obj.height)) {
-                        return true; // Overlap detected
-                    }
-                }
-                return false; // No overlap
-            }
-
-
-            addGrassAreas() {
-                // Add grass patches in empty areas with STRICT road avoidance
-                for (let i = 0; i < 20; i++) {
-                    const size = 80 + Math.random() * 60;
-                    const x = Math.random() * (this.worldWidth - size - 50) + 25;
-                    const y = Math.random() * (this.worldHeight - size - 50) + 25;
-                    
-                    // Use universal road avoidance
-                    if (!this.isAreaOnRoad(x, y, size, size)) {
-                        const grass = this.add.rectangle(x, y, size, size, 0x90EE90);
-                        grass.setOrigin(0, 0);
-                        grass.setAlpha(0.6);
-                        
-                        // Add some small details to grass areas
-                        if (Math.random() < 0.5) {
-                            const detailX = x + Math.random() * size;
-                            const detailY = y + Math.random() * size;
-                            const detail = this.add.circle(detailX, detailY, 3 + Math.random() * 4, 0x228B22);
-                            detail.setAlpha(0.8);
-                        }
-                    }
-                }
-            }
-
-            createProperBuilding(x, y, blockSize, buildingType) {
-                // Check for overlap with existing objects
-                if (this.checkObjectOverlap(x, y, blockSize, blockSize)) {
-                    return; // Don't place building if it overlaps
-                }
-                
-                const sidewalkWidth = 12;
-                
-                // Create sidewalk border
-                this.createSidewalkBorder(x, y, blockSize, sidewalkWidth);
-                
-                // Create building in center with proper collision
-                const buildingSize = blockSize - 2 * sidewalkWidth;
-                const buildingX = x + blockSize/2;
-                const buildingY = y + blockSize/2;
-                
-                const building = this.physics.add.sprite(buildingX, buildingY, buildingType);
-                building.setOrigin(0.5, 0.5);
-                building.setScale(0.6); // Make buildings smaller
-                building.body.setImmovable(true);
-                
-                // Set collision box to match actual building size (not including transparent areas)
-                let collisionWidth, collisionHeight, offsetX, offsetY;
-                
-                switch(buildingType) {
-                    case 'building_office':
-                        collisionWidth = 48;
-                        collisionHeight = 48;
-                        offsetX = 8;
-                        offsetY = 8;
-                        break;
-                    case 'building_residential':
-                        collisionWidth = 44;
-                        collisionHeight = 44;
-                        offsetX = 10;
-                        offsetY = 10;
-                        break;
-                    case 'building_commercial':
-                        collisionWidth = 52;
-                        collisionHeight = 52;
-                        offsetX = 6;
-                        offsetY = 6;
-                        break;
-                    case 'building_house':
-                        collisionWidth = 40;
-                        collisionHeight = 36;
-                        offsetX = 12;
-                        offsetY = 16;
-                        break;
-                    case 'building_apartment':
-                        collisionWidth = 32;
-                        collisionHeight = 56;
-                        offsetX = 16;
-                        offsetY = 4;
-                        break;
-                    default:
-                        collisionWidth = 50;
-                        collisionHeight = 50;
-                        offsetX = 7;
-                        offsetY = 7;
-                }
-                
-                building.body.setSize(collisionWidth, collisionHeight);
-                building.body.setOffset(offsetX, offsetY);
-                this.buildings.push(building);
-                
-                // Register this building as a placed object
-                this.placedObjects.push({x: x, y: y, width: blockSize, height: blockSize, type: 'building'});
-            }
-
-            createSidewalkBorder(x, y, size, sidewalkWidth) {
-                // Top sidewalk
-                const sidewalkTop = this.add.rectangle(x, y, size, sidewalkWidth, 0xcccccc);
-                sidewalkTop.setOrigin(0, 0);
-                this.sidewalkAreas.push({x: x, y: y, width: size, height: sidewalkWidth});
-                
-                // Bottom sidewalk
-                const sidewalkBottom = this.add.rectangle(x, y + size - sidewalkWidth, size, sidewalkWidth, 0xcccccc);
-                sidewalkBottom.setOrigin(0, 0);
-                this.sidewalkAreas.push({x: x, y: y + size - sidewalkWidth, width: size, height: sidewalkWidth});
-                
-                // Left sidewalk
-                const sidewalkLeft = this.add.rectangle(x, y + sidewalkWidth, sidewalkWidth, size - 2 * sidewalkWidth, 0xcccccc);
-                sidewalkLeft.setOrigin(0, 0);
-                this.sidewalkAreas.push({x: x, y: y + sidewalkWidth, width: sidewalkWidth, height: size - 2 * sidewalkWidth});
-                
-                // Right sidewalk
-                const sidewalkRight = this.add.rectangle(x + size - sidewalkWidth, y + sidewalkWidth, sidewalkWidth, size - 2 * sidewalkWidth, 0xcccccc);
-                sidewalkRight.setOrigin(0, 0);
-                this.sidewalkAreas.push({x: x + size - sidewalkWidth, y: y + sidewalkWidth, width: sidewalkWidth, height: size - 2 * sidewalkWidth});
-            }
-
-            createPlayer() {
-                // Spawn player in a safe location in the new smaller world
-                this.player = this.physics.add.sprite(960, 960, 'player');
-                this.player.setCollideWorldBounds(true);
-                this.player.setScale(0.07);
-                // Properly sized collision box for player (32x32 sprite)
-                this.player.body.setSize(22, 22);
-                this.player.body.setOffset(5, 5); // Center the collision box
-                this.player.body.setDrag(400);
-                this.player.body.setMaxVelocity(180);
-                
-                // Player properties
-                this.player.maxHealth = 100;
-                this.player.money = 0;
-            }
-
-            createVehicles() {
-                const vehicleConfigs = [
-                    { type: 'car_red', maxSpeed: 280, acceleration: 250, health: 100 },
-                    { type: 'truck_blue', maxSpeed: 200, acceleration: 180, health: 150 },
-                    { type: 'car_police', maxSpeed: 300, acceleration: 280, health: 120 }
-                ];
-                
-                // Spawn vehicles around the city
-                for (let i = 0; i < 25; i++) {
-                    let x, y;
-                    do {
-                        x = Phaser.Math.Between(100, this.worldWidth - 100);
-                        y = Phaser.Math.Between(100, this.worldHeight - 100);
-                    } while (Math.abs(x - 1200) < 200 && Math.abs(y - 1200) < 200); // Don't spawn near player
-                    
-                    const config = Phaser.Utils.Array.GetRandom(vehicleConfigs);
-                    const vehicle = this.physics.add.sprite(x, y, config.type);
-                    
-                    vehicle.setScale(0.09);
-                    // Properly sized collision box for vehicles (64x64 sprite)
-                    vehicle.body.setSize(55, 35);
-                    vehicle.body.setOffset(4.5, 14.5); // Center the collision box
-                    vehicle.body.setDrag(150);
-                    
-                    // Align vehicles with roads (0, 90, 180, 270 degrees) - adjusted for RIGHT-facing sprites
-                    const roadAlignedRotation = (Math.floor(Math.random() * 4) * Math.PI / 2);
-                    vehicle.setRotation(roadAlignedRotation);
-                    
-                    // Vehicle properties
-                    Object.assign(vehicle, config);
-                    vehicle.currentHealth = config.health;
-                    vehicle.isPlayerVehicle = false;
-                    vehicle.lastDriver = null;
-                    
-                    this.vehicles.push(vehicle);
-                }
-            }
-
-            createNPCs() {
-                // Create pedestrians only on sidewalks
-                for (let i = 0; i < 40; i++) {
-                    if (this.sidewalkAreas.length === 0) continue;
-                    
-                    // Pick a random sidewalk area
-                    const sidewalk = Phaser.Utils.Array.GetRandom(this.sidewalkAreas);
-                    const x = sidewalk.x + Math.random() * sidewalk.width;
-                    const y = sidewalk.y + Math.random() * sidewalk.height;
-                    
-                    const npc = this.physics.add.sprite(x, y, 'npc');
-                    npc.setScale(0.07);
-                    // Properly sized collision box for NPCs (32x32 sprite)
-                    npc.body.setSize(20, 20);
-                    npc.body.setOffset(6, 6); // Center the collision box
-                    npc.setTint(Phaser.Math.Between(0x888888, 0xffffff));
-                    
-                    // NPC AI properties
-                    npc.walkDirection = Math.random() * Math.PI * 2;
-                    npc.walkSpeed = 30 + Math.random() * 20;
-                    npc.changeDirectionTimer = 0;
-                    npc.panicMode = false;
-                    npc.panicTimer = 0;
-                    npc.currentSidewalk = sidewalk;
-                    
-                    this.npcs.push(npc);
-                }
-            }
-
-            // Helper function to check if position is on sidewalk
-            isOnSidewalk(x, y) {
-                return this.sidewalkAreas.some(sidewalk => 
-                    x >= sidewalk.x && x <= sidewalk.x + sidewalk.width &&
-                    y >= sidewalk.y && y <= sidewalk.y + sidewalk.height
-                );
-            }
-
-            createMissions() {
-                this.missions = [
-                    {
-                        id: 1,
-                        name: "First Ride",
-                        description: "Steal a vehicle and drive to the marked location",
-                        target: { x: 1800, y: 800 },
-                        reward: 500,
-                        completed: false
-                    },
-                    {
-                        id: 2,
-                        name: "Escape the Heat",
-                        description: "Lose a 3-star wanted level",
-                        target: null,
-                        reward: 1000,
-                        completed: false
-                    }
-                ];
-                
-                this.currentMission = this.missions[0];
-                this.createMissionMarker();
-            }
-
-            createMissionMarker() {
-                if (this.currentMission && this.currentMission.target) {
-                    if (this.missionTarget) {
-                        this.missionTarget.destroy();
-                    }
-                    
-                    this.missionTarget = this.add.circle(
-                        this.currentMission.target.x, 
-                        this.currentMission.target.y, 
-                        30, 
-                        0x00ff00
-                    );
-                    this.missionTarget.setAlpha(0.7);
-                    
-                    // Pulsing animation
-                    this.tweens.add({
-                        targets: this.missionTarget,
-                        alpha: 0.3,
-                        duration: 1000,
-                        yoyo: true,
-                        repeat: -1
-                    });
-                }
-            }
-
-            setupControls() {
-                this.cursors = this.input.keyboard.createCursorKeys();
-                this.wasdKeys = this.input.keyboard.addKeys('W,S,A,D,E,SPACE,R,ESC,Q,F,ONE,TWO,THREE,G');
-                
-                // Vehicle interaction
-                this.wasdKeys.E.on('down', () => {
-                    this.handleVehicleInteraction();
-                });
-                
-                // Weapon controls
-                this.wasdKeys.Q.on('down', () => {
-                    this.switchWeapon();
-                });
-                
-                this.wasdKeys.ONE.on('down', () => {
-                    this.currentWeapon = 0;
-                    this.updateUI();
-                });
-                
-                this.wasdKeys.TWO.on('down', () => {
-                    this.currentWeapon = 1;
-                    this.updateUI();
-                });
-                
-                this.wasdKeys.THREE.on('down', () => {
-                    this.currentWeapon = 2;
-                    this.updateUI();
-                });
-                
-                // TESTE: Tecla G para Game Over (temporário)
-                this.wasdKeys.G.on('down', () => {
-                    this.scene.start('GameOverScene');
-                });
-                
-                // Mouse shooting - hold for automatic fire
-                this.input.on('pointerdown', (pointer) => {
-                    if (!this.playerInVehicle) {
-                        this.isAutoFiring = true;
-                        this.autoFireTarget = { x: pointer.worldX, y: pointer.worldY };
-                        this.shoot(pointer.worldX, pointer.worldY);
-                    }
-                });
-                
-                this.input.on('pointerup', () => {
-                    this.isAutoFiring = false;
-                });
-                
-                // F key shooting (alternative) - hold for automatic fire
-                this.wasdKeys.F.on('down', () => {
-                    if (!this.playerInVehicle) {
-                        this.isAutoFiring = true;
-                        this.shootForward();
-                    }
-                });
-                
-                this.wasdKeys.F.on('up', () => {
-                    this.isAutoFiring = false;
-                });
-                
-                // Cheat codes
-                this.wasdKeys.R.on('down', () => {
-                    this.wantedLevel = 0;
-                    this.updateUI();
-                });
-            }
-
-            switchWeapon() {
-                this.currentWeapon = (this.currentWeapon + 1) % this.weapons.length;
-                this.updateUI();
-            }
-
-            shoot(targetX, targetY) {
-                const weapon = this.weapons[this.currentWeapon];
-                const currentTime = this.time.now;
-                
-                // Check fire rate
-                if (currentTime - this.lastShotTime < weapon.fireRate) return;
-                
-                // Check ammo
-                if (weapon.ammo <= 0) return;
-                
-                // Decrease ammo
-                weapon.ammo--;
-                this.lastShotTime = currentTime;
-                
-                // Calculate shooting direction
-                const playerX = this.player.x;
-                const playerY = this.player.y;
-                const baseAngle = Phaser.Math.Angle.Between(playerX, playerY, targetX, targetY);
-                
-                // Fire multiple pellets for realistic weapon behavior
-                for (let i = 0; i < weapon.pelletsPerShot; i++) {
-                    // Add random spread
-                    const spreadAngle = baseAngle + (Math.random() - 0.5) * weapon.spread;
-                    
-                    // Create bullet with spread
-                    this.createBullet(playerX, playerY, spreadAngle, weapon.damage);
-                }
-                
-                // Create muzzle flash
-                this.createMuzzleFlash(playerX, playerY);
-                
-                // Increase wanted level (only sometimes for gunfire to avoid constant crime)
-                if (Math.random() < 0.3) { // 30% chance to increase wanted level
-                    this.increaseCrime("Gunfire");
-                }
-                
-                this.updateUI();
-            }
-
-            shootForward() {
-                const weapon = this.weapons[this.currentWeapon];
-                const currentTime = this.time.now;
-                
-                // Check fire rate
-                if (currentTime - this.lastShotTime < weapon.fireRate) return;
-                
-                // Check ammo
-                if (weapon.ammo <= 0) return;
-                
-                // Decrease ammo
-                weapon.ammo--;
-                this.lastShotTime = currentTime;
-                
-                // Shoot in the direction player is facing (up by default)
-                const baseAngle = -Math.PI / 2;
-                
-                // Fire multiple pellets for realistic weapon behavior
-                for (let i = 0; i < weapon.pelletsPerShot; i++) {
-                    // Add random spread
-                    const spreadAngle = baseAngle + (Math.random() - 0.5) * weapon.spread;
-                    
-                    // Create bullet with spread
-                    this.createBullet(this.player.x, this.player.y, spreadAngle, weapon.damage);
-                }
-                
-                // Create muzzle flash
-                this.createMuzzleFlash(this.player.x, this.player.y);
-                
-                // Increase wanted level (only sometimes for gunfire to avoid constant crime)
-                if (Math.random() < 0.3) { // 30% chance to increase wanted level
-                    this.increaseCrime("Gunfire");
-                }
-                
-                this.updateUI();
-            }
-
-            createBullet(x, y, angle, damage) {
-                const bullet = this.physics.add.sprite(x, y, 'bullet');
-                bullet.setScale(0.8);
-                bullet.body.setSize(6, 6);
-                bullet.damage = damage;
-                bullet.startTime = this.time.now;
-                
-                // Set bullet velocity
-                const bulletSpeed = 800;
-                this.physics.velocityFromRotation(angle, bulletSpeed, bullet.body.velocity);
-                
-                this.bullets.push(bullet);
-                
-                // Remove bullet after 2 seconds
-                this.time.delayedCall(2000, () => {
-                    if (bullet && bullet.active) {
-                        bullet.destroy();
-                        const index = this.bullets.indexOf(bullet);
-                        if (index > -1) this.bullets.splice(index, 1);
-                    }
-                });
-            }
-
-            createMuzzleFlash(x, y) {
-                const flash = this.add.sprite(x, y, 'muzzle_flash');
-                flash.setScale(0.5);
-                flash.setDepth(100);
-                this.muzzleFlashes.push(flash);
-                
-                // Remove flash after short time
-                this.time.delayedCall(100, () => {
-                    if (flash && flash.active) {
-                        flash.destroy();
-                        const index = this.muzzleFlashes.indexOf(flash);
-                        if (index > -1) this.muzzleFlashes.splice(index, 1);
-                    }
-                });
-            }
-
-            setupTimers() {
-                // Wanted level decay
-                this.wantedLevelTimer = this.time.addEvent({
-                    delay: 8000,
-                    callback: this.decreaseWantedLevel,
-                    callbackScope: this,
-                    loop: true
-                });
-
-                // Police spawn timer
-                this.policeSpawnTimer = this.time.addEvent({
-                    delay: 4000,
-                    callback: this.spawnPolice,
-                    callbackScope: this,
-                    loop: true
-                });
-
-                // NPC behavior timer
-                this.npcUpdateTimer = this.time.addEvent({
-                    delay: 100,
-                    callback: this.updateNPCBehavior,
-                    callbackScope: this,
-                    loop: true
-                });
-            }
-
-            createUI() {
-                const { width, height } = this.sys.game.config;
-                
-                // Health bar background
-                this.gameUI.healthBarBg = this.add.rectangle(60, 60, 220, 25, 0x660000);
-                this.gameUI.healthBarBg.setOrigin(0, 0);
-                this.gameUI.healthBarBg.setScrollFactor(0);
-                this.gameUI.healthBarBg.setDepth(1000);
-                
-                // Health bar
-                this.gameUI.healthBar = this.add.rectangle(62, 62, 216, 21, 0x00ff00);
-                this.gameUI.healthBar.setOrigin(0, 0);
-                this.gameUI.healthBar.setScrollFactor(0);
-                this.gameUI.healthBar.setDepth(1001);
-                
-                // Health text
-                this.gameUI.healthText = this.add.text(70, 67, 'HEALTH', {
-                    fontSize: '14px',
-                    color: '#ffffff',
-                    fontWeight: 'bold'
-                });
-                this.gameUI.healthText.setScrollFactor(0);
-                this.gameUI.healthText.setDepth(1002);
-                
-                // Wanted level stars
-                this.gameUI.wantedStars = [];
-                this.gameUI.wantedText = this.add.text(320, 67, 'WANTED:', {
-                    fontSize: '14px',
-                    color: '#ffffff',
-                    fontWeight: 'bold'
-                });
-                this.gameUI.wantedText.setScrollFactor(0);
-                this.gameUI.wantedText.setDepth(1002);
-                
-                for (let i = 0; i < 5; i++) {
-                    const star = this.add.text(400 + i * 22, 60, '★', {
-                        fontSize: '18px',
-                        color: '#333333'
-                    });
-                    star.setScrollFactor(0);
-                    star.setDepth(1002);
-                    this.gameUI.wantedStars.push(star);
-                }
-                
-                // Money display
-                this.gameUI.moneyText = this.add.text(60, 100, '$0', {
-                    fontSize: '16px',
-                    color: '#00ff00',
-                    fontWeight: 'bold'
-                });
-                this.gameUI.moneyText.setScrollFactor(0);
-                this.gameUI.moneyText.setDepth(1002);
-                
-                // Speed/Vehicle info
-                this.gameUI.speedText = this.add.text(60, 130, 'ON FOOT', {
-                    fontSize: '14px',
-                    color: '#ffffff'
-                });
-                this.gameUI.speedText.setScrollFactor(0);
-                this.gameUI.speedText.setDepth(1002);
-                
-                // Mission info
-                this.gameUI.missionText = this.add.text(60, 160, '', {
-                    fontSize: '12px',
-                    color: '#ffff00',
-                    wordWrap: { width: 300 }
-                });
-                this.gameUI.missionText.setScrollFactor(0);
-                this.gameUI.missionText.setDepth(1002);
-                
-                // Weapon info
-                this.gameUI.weaponText = this.add.text(60, 190, '', {
-                    fontSize: '14px',
-                    color: '#00ff00'
-                });
-                this.gameUI.weaponText.setScrollFactor(0);
-                this.gameUI.weaponText.setDepth(1002);
-                
-                // Controls info
-                this.gameUI.controlsText = this.add.text(60, 220, 'WEAPONS: Q-Switch | F-Shoot | 1,2,3-Select | Mouse-Aim&Shoot | HOLD for auto-fire', {
-                    fontSize: '10px',
-                    color: '#cccccc'
-                });
-                this.gameUI.controlsText.setScrollFactor(0);
-                this.gameUI.controlsText.setDepth(1002);
-                
-                // Minimap - positioned properly to avoid cutoff
-                const minimapSize = 150;
-                const minimapX = width - minimapSize - 10;
-                const minimapY = minimapSize/2 + 10; // Center position to avoid top cutoff
-                
-                // Minimap background
-                this.gameUI.minimapBg = this.add.rectangle(
-                    minimapX, minimapY, minimapSize, minimapSize, 0x000000
-                );
-                this.gameUI.minimapBg.setScrollFactor(0);
-                this.gameUI.minimapBg.setDepth(1000);
-                this.gameUI.minimapBg.setAlpha(0.8);
-                
-                // Create minimap representation of the world
-                this.createMinimapLayout(minimapX, minimapY, minimapSize);
-                
-                // Minimap border
-                this.gameUI.minimapBorder = this.add.rectangle(
-                    minimapX, minimapY, minimapSize, minimapSize
-                );
-                this.gameUI.minimapBorder.setScrollFactor(0);
-                this.gameUI.minimapBorder.setDepth(1003);
-                this.gameUI.minimapBorder.setStrokeStyle(2, 0xff6b35);
-                
-                // Minimap player dot
-                this.gameUI.minimapPlayer = this.add.circle(minimapX, minimapY, 3, 0x00ff00);
-                this.gameUI.minimapPlayer.setScrollFactor(0);
-                this.gameUI.minimapPlayer.setDepth(1004);
-            }
-
-            createMinimapLayout(minimapX, minimapY, minimapSize) {
-                const worldScale = minimapSize / Math.max(this.worldWidth, this.worldHeight);
-                
-                // Draw roads on minimap
-                this.roadAreas.forEach(road => {
-                    const minimapRoadX = minimapX - minimapSize/2 + (road.x * worldScale);
-                    const minimapRoadY = minimapY - minimapSize/2 + (road.y * worldScale);
-                    const minimapRoadWidth = road.width * worldScale;
-                    const minimapRoadHeight = road.height * worldScale;
-                    
-                    const roadBlock = this.add.rectangle(
-                        minimapRoadX + minimapRoadWidth/2,
-                        minimapRoadY + minimapRoadHeight/2,
-                        minimapRoadWidth, minimapRoadHeight, 0x444444
-                    );
-                    roadBlock.setScrollFactor(0);
-                    roadBlock.setDepth(1001);
-                });
-                
-                // Draw buildings on minimap (simplified)
-                this.buildings.forEach(building => {
-                    const minimapBuildingX = minimapX - minimapSize/2 + (building.x * worldScale);
-                    const minimapBuildingY = minimapY - minimapSize/2 + (building.y * worldScale);
-                    
-                    const buildingDot = this.add.rectangle(
-                        minimapBuildingX, minimapBuildingY, 2, 2, 0x888888
-                    );
-                    buildingDot.setScrollFactor(0);
-                    buildingDot.setDepth(1001);
-                });
-            }
-
-            handleVehicleInteraction() {
-                if (this.playerInVehicle) {
-                    this.exitVehicle();
-                } else {
-                    this.enterNearbyVehicle();
-                }
-            }
-
-            enterNearbyVehicle() {
-                let closestVehicle = null;
-                let closestDistance = Infinity;
-                
-                for (let vehicle of this.vehicles) {
-                    if (vehicle.isPlayerVehicle) continue;
-                    
-                    const distance = Phaser.Math.Distance.Between(
-                        this.player.x, this.player.y,
-                        vehicle.x, vehicle.y
-                    );
-                    
-                    if (distance < 60 && distance < closestDistance) {
-                        closestDistance = distance;
-                        closestVehicle = vehicle;
-                    }
-                }
-                
-                if (closestVehicle) {
-                    this.enterVehicle(closestVehicle);
-                }
-            }
-
-            enterVehicle(vehicle) {
-                this.playerInVehicle = true;
-                this.currentVehicle = vehicle;
-                this.player.setVisible(false);
-                vehicle.isPlayerVehicle = true;
-                
-                // Crime for car theft - only if it's not already your vehicle
-                if (!vehicle.isPlayerVehicle && !vehicle.lastDriver === 'player') {
-                    this.increaseCrime("Car Theft");
-                    vehicle.lastDriver = 'player';
-                }
-                
-                // Camera follows vehicle
-                this.cameras.main.startFollow(vehicle, true, 0.1, 0.1);
-                
-                // Show vehicle entered notification
-                this.showNotification(`Entered ${vehicle.type.replace('_', ' ').toUpperCase()}!`);
-            }
-
-            exitVehicle() {
-                if (this.currentVehicle) {
-                    // Find safe exit position
-                    const exitDistance = 45;
-                    const exitAngle = this.currentVehicle.rotation + Math.PI / 2;
-                    
-                    this.player.setPosition(
-                        this.currentVehicle.x + Math.cos(exitAngle) * exitDistance,
-                        this.currentVehicle.y + Math.sin(exitAngle) * exitDistance
-                    );
-                    
-                    this.player.setVisible(true);
-                    this.currentVehicle.isPlayerVehicle = false;
-                    this.currentVehicle = null;
-                    this.playerInVehicle = false;
-                    
-                    // Camera follows player
-                    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
-                }
-            }
-
-            spawnPolice() {
-                if (this.wantedLevel >= 2 && this.policeCars.length < this.wantedLevel) {
-                    // Spawn police car at world edge
-                    const spawnSide = Math.floor(Math.random() * 4);
-                    let x, y;
-                    
-                    switch (spawnSide) {
-                        case 0: // Top
-                            x = Phaser.Math.Between(0, this.worldWidth);
-                            y = 0;
-                            break;
-                        case 1: // Right
-                            x = this.worldWidth;
-                            y = Phaser.Math.Between(0, this.worldHeight);
-                            break;
-                        case 2: // Bottom
-                            x = Phaser.Math.Between(0, this.worldWidth);
-                            y = this.worldHeight;
-                            break;
-                        case 3: // Left
-                            x = 0;
-                            y = Phaser.Math.Between(0, this.worldHeight);
-                            break;
-                    }
-                    
-                    const policeCar = this.physics.add.sprite(x, y, 'car_police');
-                    policeCar.setScale(0.05);
-                    policeCar.body.setSize(50, 25);
-                    policeCar.body.setDrag(100);
-                    policeCar.isPolice = true;
-                    policeCar.health = 120;
-                    policeCar.maxSpeed = 320;
-                    policeCar.chaseIntensity = this.wantedLevel;
-                    
-                    this.policeCars.push(policeCar);
-                    this.vehicles.push(policeCar);
-                }
-            }
-
-            increaseCrime(crimeType = "Unknown") {
-                this.wantedLevel = Math.min(5, this.wantedLevel + 1);
-                this.lastCrimeTime = this.time.now;
-                this.updateUI();
-                
-                console.log(`Crime committed: ${crimeType} - Wanted Level: ${this.wantedLevel}`);
-                
-                // Make nearby NPCs panic
-                this.makeNearbyNPCsPanic();
-            }
-
-            makeNearbyNPCsPanic() {
-                const playerPos = this.playerInVehicle ? this.currentVehicle : this.player;
-                
-                this.npcs.forEach(npc => {
-                    const distance = Phaser.Math.Distance.Between(
-                        playerPos.x, playerPos.y,
-                        npc.x, npc.y
-                    );
-                    
-                    if (distance < 200) {
-                        npc.panicMode = true;
-                        npc.panicTimer = 5000; // 5 seconds of panic
-                        
-                        // Run away from player
-                        const angle = Phaser.Math.Angle.Between(
-                            playerPos.x, playerPos.y,
-                            npc.x, npc.y
-                        );
-                        npc.walkDirection = angle;
-                        npc.walkSpeed = 120; // Faster when panicking
-                    }
-                });
-            }
-
-            decreaseWantedLevel() {
-                if (this.time.now - this.lastCrimeTime > 15000 && this.wantedLevel > 0) {
-                    this.wantedLevel = Math.max(0, this.wantedLevel - 1);
-                    this.updateUI();
-                    
-                    // Remove some police cars
-                    if (this.policeCars.length > this.wantedLevel) {
-                        const excessPolice = this.policeCars.splice(this.wantedLevel);
-                        excessPolice.forEach(car => {
-                            const index = this.vehicles.indexOf(car);
-                            if (index > -1) this.vehicles.splice(index, 1);
-                            car.destroy();
-                        });
-                    }
-                }
-            }
-
-            updateNPCBehavior() {
-                this.npcs.forEach(npc => {
-                    // If NPC is on a road, move them to safety but don't freeze them
-                    if (this.isOnRoad(npc.x, npc.y)) {
-                        this.moveNPCToNearestSidewalk(npc);
-                    }
-                    
-                    // Update panic state
-                    if (npc.panicMode) {
-                        npc.panicTimer -= 100;
-                        if (npc.panicTimer <= 0) {
-                            npc.panicMode = false;
-                            npc.walkSpeed = 30 + Math.random() * 20;
-                        }
-                    }
-                    
-                    // Change direction occasionally
-                    npc.changeDirectionTimer += 100;
-                    if (npc.changeDirectionTimer > 2000 + Math.random() * 3000) {
-                        npc.walkDirection = Math.random() * Math.PI * 2;
-                        npc.changeDirectionTimer = 0;
-                    }
-                    
-                    // Calculate next position
-                    const speed = npc.panicMode ? npc.walkSpeed * 1.8 : npc.walkSpeed;
-                    const nextX = npc.x + Math.cos(npc.walkDirection) * speed * 0.016;
-                    const nextY = npc.y + Math.sin(npc.walkDirection) * speed * 0.016;
-                    
-                    // Check if next position is safe (not on road and not hitting buildings)
-                    let canMove = true;
-                    
-                    // Don't move onto roads
-                    if (this.isOnRoad(nextX, nextY)) {
-                        canMove = false;
-                    }
-                    
-                    // Don't move too close to buildings
-                    for (let building of this.buildings) {
-                        const distance = Phaser.Math.Distance.Between(nextX, nextY, building.x, building.y);
-                        if (distance < 45) {
-                            canMove = false;
-                            break;
-                        }
-                    }
-                    
-                    if (canMove) {
-                        // Move normally
-                        npc.body.setVelocity(
-                            Math.cos(npc.walkDirection) * speed,
-                            Math.sin(npc.walkDirection) * speed
-                        );
-                    } else {
-                        // Try a different direction
-                        const alternatives = [
-                            npc.walkDirection + Math.PI/4,
-                            npc.walkDirection - Math.PI/4,
-                            npc.walkDirection + Math.PI/2,
-                            npc.walkDirection - Math.PI/2,
-                            npc.walkDirection + Math.PI
-                        ];
-                        
-                        let foundDirection = false;
-                        for (let altDirection of alternatives) {
-                            const altX = npc.x + Math.cos(altDirection) * speed * 0.016;
-                            const altY = npc.y + Math.sin(altDirection) * speed * 0.016;
-                            
-                            if (!this.isOnRoad(altX, altY)) {
-                                npc.walkDirection = altDirection;
-                                npc.body.setVelocity(
-                                    Math.cos(altDirection) * speed,
-                                    Math.sin(altDirection) * speed
-                                );
-                                foundDirection = true;
-                                break;
-                            }
-                        }
-                        
-                        if (!foundDirection) {
-                            // If all directions blocked, move slowly in current direction
-                            npc.body.setVelocity(
-                                Math.cos(npc.walkDirection) * speed * 0.3,
-                                Math.sin(npc.walkDirection) * speed * 0.3
-                            );
-                        }
-                    }
-                    
-                    // Keep NPCs in bounds
-                    if (npc.x < 50 || npc.x > this.worldWidth - 50 || 
-                        npc.y < 50 || npc.y > this.worldHeight - 50) {
-                        npc.walkDirection += Math.PI;
-                    }
-                });
-            }
-
-            moveNPCToNearestSidewalk(npc) {
-                let nearestSidewalk = null;
-                let minDistance = Infinity;
-                
-                // Find the nearest sidewalk
-                for (let sidewalk of this.sidewalkAreas) {
-                    const centerX = sidewalk.x + sidewalk.width / 2;
-                    const centerY = sidewalk.y + sidewalk.height / 2;
-                    const distance = Phaser.Math.Distance.Between(npc.x, npc.y, centerX, centerY);
-                    
-                    if (distance < minDistance) {
-                        minDistance = distance;
-                        nearestSidewalk = sidewalk;
-                    }
-                }
-                
-                if (nearestSidewalk) {
-                    // Move NPC to center of nearest sidewalk immediately
-                    npc.x = nearestSidewalk.x + nearestSidewalk.width / 2;
-                    npc.y = nearestSidewalk.y + nearestSidewalk.height / 2;
-                    npc.body.setVelocity(0, 0);
-                    console.log("NPC rescued from road and moved to sidewalk!");
-                }
-            }
-
-            findSafeWalkDirection(npc) {
-                // Try to find a direction that stays on sidewalk and away from roads
-                for (let attempts = 0; attempts < 16; attempts++) {
-                    const testDirection = (attempts / 16) * Math.PI * 2; // Test evenly spaced directions
-                    const testDistance = 50; // Look ahead distance
-                    const testX = npc.x + Math.cos(testDirection) * testDistance;
-                    const testY = npc.y + Math.sin(testDirection) * testDistance;
-                    
-                    if (this.isOnSidewalk(testX, testY) && !this.isOnRoad(testX, testY)) {
-                        return testDirection;
-                    }
-                }
-                
-                // If no good direction found, just stop
-                return npc.walkDirection;
-            }
-
-            showNotification(text, color = '#ffff00') {
-                const notification = this.add.text(
-                    this.sys.game.config.width / 2, 
-                    200, 
-                    text, 
-                    {
-                        fontSize: '18px',
-                        color: color,
-                        fontWeight: 'bold'
-                    }
-                );
-                notification.setOrigin(0.5);
-                notification.setScrollFactor(0);
-                notification.setDepth(2000);
-                
-                // Fade out animation
-                this.tweens.add({
-                    targets: notification,
-                    alpha: 0,
-                    y: 150,
-                    duration: 3000,
-                    onComplete: () => notification.destroy()
-                });
-            }
-
-            checkMissionProgress() {
-                if (!this.currentMission || this.currentMission.completed) return;
-                
-                const playerPos = this.playerInVehicle ? this.currentVehicle : this.player;
-                
-                switch (this.currentMission.id) {
-                    case 1: // First Ride
-                        if (this.playerInVehicle && this.currentMission.target) {
-                            const distance = Phaser.Math.Distance.Between(
-                                playerPos.x, playerPos.y,
-                                this.currentMission.target.x, this.currentMission.target.y
-                            );
-                            
-                            if (distance < 80) {
-                                this.completeMission();
-                            }
-                        }
-                        break;
-                        
-                    case 2: // Escape the Heat
-                        if (this.wantedLevel === 0) {
-                            this.completeMission();
-                        }
-                        break;
-                }
-            }
-
-            completeMission() {
-                if (this.currentMission) {
-                    this.currentMission.completed = true;
-                    this.playerMoney += this.currentMission.reward;
-                    
-                    this.showNotification(
-                        `MISSION COMPLETE! +$${this.currentMission.reward}`, 
-                        '#00ff00'
-                    );
-                    
-                    // Remove mission marker
-                    if (this.missionTarget) {
-                        this.missionTarget.destroy();
-                        this.missionTarget = null;
-                    }
-                    
-                    // Start next mission
-                    const nextMission = this.missions.find(m => !m.completed);
-                    if (nextMission) {
-                        this.currentMission = nextMission;
-                        this.createMissionMarker();
-                    } else {
-                        this.currentMission = null;
-                        this.showNotification("ALL MISSIONS COMPLETE!", '#ff6b35');
-                    }
-                }
-            }
-
-            updateBullets() {
-                // Handle bullet collisions
-                this.bullets.forEach((bullet, bulletIndex) => {
-                    if (!bullet || !bullet.active) return;
-                    
-                    // Check collision with NPCs
-                    this.npcs.forEach((npc, npcIndex) => {
-                        if (this.physics.overlap(bullet, npc)) {
-                            // NPC hit
-                            this.hitNPC(npc, bullet.damage);
-                            this.npcs.splice(npcIndex, 1);
-                            npc.destroy();
-                            
-                            // Remove bullet
-                            bullet.destroy();
-                            this.bullets.splice(bulletIndex, 1);
-                            
-                            // Crime for shooting civilian
-                            this.increaseCrime("Shot Civilian");
-                        }
-                    });
-                    
-                    // Check collision with vehicles
-                    this.vehicles.forEach((vehicle, vehicleIndex) => {
-                        if (this.physics.overlap(bullet, vehicle) && vehicle !== this.currentVehicle) {
-                            // Vehicle hit
-                            this.hitVehicle(vehicle, bullet.damage);
-                            
-                            // Remove bullet
-                            bullet.destroy();
-                            this.bullets.splice(bulletIndex, 1);
-                            
-                            // Crime for property damage
-                            this.increaseCrime("Property Damage");
-                        }
-                    });
-                    
-                    // Check collision with police
-                    this.policeCars.forEach((policeCar, policeIndex) => {
-                        if (this.physics.overlap(bullet, policeCar)) {
-                            // Police hit
-                            this.hitVehicle(policeCar, bullet.damage);
-                            
-                            // Remove bullet
-                            bullet.destroy();
-                            this.bullets.splice(bulletIndex, 1);
-                            
-                            // Major crime for shooting police
-                            this.increaseCrime("Shot Police");
-                            this.increaseCrime("Shot Police"); // Double crime
-                        }
-                    });
-                    
-                    // Check collision with buildings
-                    this.buildings.forEach(building => {
-                        if (this.physics.overlap(bullet, building)) {
-                            // Remove bullet
-                            bullet.destroy();
-                            const index = this.bullets.indexOf(bullet);
-                            if (index > -1) this.bullets.splice(index, 1);
-                        }
-                    });
-                    
-                    // Remove bullets that go out of bounds
-                    if (bullet.x < 0 || bullet.x > this.worldWidth || 
-                        bullet.y < 0 || bullet.y > this.worldHeight) {
-                        bullet.destroy();
-                        const index = this.bullets.indexOf(bullet);
-                        if (index > -1) this.bullets.splice(index, 1);
-                    }
-                });
-            }
-
-            hitNPC(npc, damage) {
-                // Create blood effect
-                const blood = this.add.circle(npc.x, npc.y, 8, 0xff0000);
-                this.time.delayedCall(2000, () => blood.destroy());
-                
-                // Award money for hit (criminal behavior)
-                this.playerMoney += 10;
-            }
-
-            hitVehicle(vehicle, damage) {
-                if (!vehicle.currentHealth) vehicle.currentHealth = vehicle.health || 100;
-                
-                vehicle.currentHealth -= damage;
-                
-                // Visual damage effect
-                vehicle.setTint(0xff6666);
-                this.time.delayedCall(200, () => {
-                    if (vehicle.active) vehicle.clearTint();
-                });
-                
-                // Destroy vehicle if health is too low
-                if (vehicle.currentHealth <= 0) {
-                    this.createExplosion(vehicle.x, vehicle.y);
-                    
-                    const vehicleIndex = this.vehicles.indexOf(vehicle);
-                    if (vehicleIndex > -1) this.vehicles.splice(vehicleIndex, 1);
-                    
-                    const policeIndex = this.policeCars.indexOf(vehicle);
-                    if (policeIndex > -1) this.policeCars.splice(policeIndex, 1);
-                    
-                    vehicle.destroy();
-                }
-            }
-
-            createExplosion(x, y) {
-                // Create explosion effect
-                const explosion = this.add.circle(x, y, 30, 0xff4500);
-                explosion.setAlpha(0.8);
-                
-                this.tweens.add({
-                    targets: explosion,
-                    scaleX: 2,
-                    scaleY: 2,
-                    alpha: 0,
-                    duration: 500,
-                    onComplete: () => explosion.destroy()
-                });
-                
-                // Damage nearby NPCs and vehicles
-                const explosionRange = 100;
-                
-                this.npcs.forEach((npc, index) => {
-                    const distance = Phaser.Math.Distance.Between(x, y, npc.x, npc.y);
-                    if (distance < explosionRange) {
-                        this.hitNPC(npc, 100);
-                        this.npcs.splice(index, 1);
-                        npc.destroy();
-                    }
-                });
-                
-                this.vehicles.forEach(vehicle => {
-                    const distance = Phaser.Math.Distance.Between(x, y, vehicle.x, vehicle.y);
-                    if (distance < explosionRange && vehicle !== this.currentVehicle) {
-                        this.hitVehicle(vehicle, 50);
-                    }
-                });
-            }
-
-            updateUI() {
-                // Update health bar
-                const healthPercent = Math.max(0, this.playerHealth / 100);
-                this.gameUI.healthBar.setScale(healthPercent, 1);
-                
-                // Health bar color based on health
-                if (healthPercent > 0.6) {
-                    this.gameUI.healthBar.setFillStyle(0x00ff00);
-                } else if (healthPercent > 0.3) {
-                    this.gameUI.healthBar.setFillStyle(0xffff00);
-                } else {
-                    this.gameUI.healthBar.setFillStyle(0xff0000);
-                }
-                
-                // Update wanted stars
-                for (let i = 0; i < 5; i++) {
-                    if (i < this.wantedLevel) {
-                        this.gameUI.wantedStars[i].setColor('#ff0000');
-                    } else {
-                        this.gameUI.wantedStars[i].setColor('#333333');
-                    }
-                }
-                
-                // Update money
-                this.gameUI.moneyText.setText(`$${this.playerMoney}`);
-                
-                // Update speed/vehicle info
-                const currentObject = this.playerInVehicle ? this.currentVehicle : this.player;
-                const speed = Math.round(
-                    Math.sqrt(currentObject.body.velocity.x ** 2 + currentObject.body.velocity.y ** 2)
-                );
-                
-                if (this.playerInVehicle) {
-                    this.gameUI.speedText.setText(`${this.currentVehicle.type.replace('_', ' ').toUpperCase()} - Speed: ${speed}`);
-                } else {
-                    this.gameUI.speedText.setText('ON FOOT');
-                }
-                
-                // Update mission text
-                if (this.currentMission && !this.currentMission.completed) {
-                    this.gameUI.missionText.setText(`MISSION: ${this.currentMission.description}`);
-                } else {
-                    this.gameUI.missionText.setText('No active missions');
-                }
-                
-                // Update weapon info
-                const weapon = this.weapons[this.currentWeapon];
-                this.gameUI.weaponText.setText(`${weapon.name}: ${weapon.ammo}/${weapon.maxAmmo}`);
-                
-                // Update minimap
-                this.updateMinimap();
-            }
-
-            updateMinimap() {
-                const minimapSize = 150;
-                const worldScale = minimapSize / Math.max(this.worldWidth, this.worldHeight);
-                const { width } = this.sys.game.config;
-                
-                const playerPos = this.playerInVehicle ? this.currentVehicle : this.player;
-                
-                // Update player position on minimap - fixed positioning
-                this.gameUI.minimapPlayer.setPosition(
-                    (width - minimapSize - 10) + (playerPos.x * worldScale) - minimapSize/2,
-                    (minimapSize/2 + 10) + (playerPos.y * worldScale) - minimapSize/2
-                );
-            }
-
-            update() {
-                this.handleMovement();
-                this.updatePolice();
-                this.handleCollisions();
-                this.updateBullets();
-                this.handleAutomaticFire();
-                this.checkMissionProgress();
-                this.updateUI();
-            }
-
-            handleAutomaticFire() {
-                if (this.isAutoFiring && !this.playerInVehicle) {
-                    const weapon = this.weapons[this.currentWeapon];
-                    
-                    // Only automatic fire for weapons that support it (SMG)
-                    if (weapon.automatic) {
-                        if (this.autoFireTarget) {
-                            this.shoot(this.autoFireTarget.x, this.autoFireTarget.y);
-                        } else {
-                            this.shootForward();
-                        }
-                    }
-                }
-            }
-
-            handleMovement() {
-                const currentObject = this.playerInVehicle ? this.currentVehicle : this.player;
-                
-                if (this.playerInVehicle) {
-                    this.handleVehicleMovement(currentObject);
-                } else {
-                    this.handlePlayerMovement(currentObject);
-                }
-            }
-
-            handlePlayerMovement(player) {
-                const speed = 180;
-                let velocityX = 0;
-                let velocityY = 0;
-                
-                if (this.wasdKeys.W.isDown) velocityY = -speed;
-                if (this.wasdKeys.S.isDown) velocityY = speed;
-                if (this.wasdKeys.A.isDown) velocityX = -speed;
-                if (this.wasdKeys.D.isDown) velocityX = speed;
-                
-                // Diagonal movement normalization
-                if (velocityX !== 0 && velocityY !== 0) {
-                    velocityX *= 0.707;
-                    velocityY *= 0.707;
-                }
-                
-                player.body.setVelocity(velocityX, velocityY);
-                
-                // Player rotation based on movement
-                if (velocityX !== 0 || velocityY !== 0) {
-                    player.rotation = Math.atan2(velocityY, velocityX) + Math.PI / 2;
-                }
-            }
-
-            handleVehicleMovement(vehicle) {
-                // Don't allow movement if vehicle is stunned from collision
-                if (vehicle.collisionCooldown) {
-                    vehicle.body.setVelocity(0, 0);
-                    vehicle.body.setAcceleration(0, 0);
-                    return;
-                }
-                
-                const maxSpeed = vehicle.maxSpeed || 280;
-                const acceleration = vehicle.acceleration || 300;
-                const turnSpeed = 3.0;
-                
-                // Get current speed
-                const currentSpeed = Math.sqrt(vehicle.body.velocity.x ** 2 + vehicle.body.velocity.y ** 2);
-                
-                // Simple and reliable car physics
-                if (this.wasdKeys.W.isDown) {
-                    // Accelerate forward (sprites face right, so rotation 0 = right)
-                    this.physics.velocityFromRotation(
-                        vehicle.rotation, 
-                        acceleration, 
-                        vehicle.body.acceleration
-                    );
-                } else if (this.wasdKeys.S.isDown) {
-                    // Reverse
-                    this.physics.velocityFromRotation(
-                        vehicle.rotation, 
-                        -acceleration * 0.7, 
-                        vehicle.body.acceleration
-                    );
-                } else {
-                    // Stop acceleration when no input
-                    vehicle.body.setAcceleration(0);
-                }
-                
-                // Turning (only when moving)
-                if (currentSpeed > 20) {
-                    const turnInfluence = Math.min(currentSpeed / 100, 1);
-                    if (this.wasdKeys.A.isDown) {
-                        vehicle.rotation -= turnSpeed * 0.02 * turnInfluence;
-                    }
-                    if (this.wasdKeys.D.isDown) {
-                        vehicle.rotation += turnSpeed * 0.02 * turnInfluence;
-                    }
-                }
-                
-                // Handbrake
-                if (this.wasdKeys.SPACE.isDown) {
-                    vehicle.body.setDrag(800);
-                } else {
-                    vehicle.body.setDrag(150);
-                }
-                
-                // Speed limit
-                if (currentSpeed > maxSpeed) {
-                    vehicle.body.velocity.normalize().scale(maxSpeed);
-                }
-            }
-
-            updatePolice() {
-                this.policeCars.forEach(policeCar => {
-                    if (this.wantedLevel > 0) {
-                        const target = this.playerInVehicle ? this.currentVehicle : this.player;
-                        const distance = Phaser.Math.Distance.Between(
-                            policeCar.x, policeCar.y,
-                            target.x, target.y
-                        );
-                        
-                        if (distance > 100) {
-                            // Chase behavior - but check for buildings first
-                            const angle = Phaser.Math.Angle.Between(
-                                policeCar.x, policeCar.y,
-                                target.x, target.y
-                            );
-                            
-                            // Check if path to player is blocked by buildings
-                            let canMoveToTarget = true;
-                            const moveDistance = 60; // How far to check ahead
-                            const checkX = policeCar.x + Math.cos(angle) * moveDistance;
-                            const checkY = policeCar.y + Math.sin(angle) * moveDistance;
-                            
-                            // Check collision with buildings ahead
-                            for (let building of this.buildings) {
-                                const buildingDistance = Phaser.Math.Distance.Between(checkX, checkY, building.x, building.y);
-                                if (buildingDistance < 50) { // If path is blocked
-                                    canMoveToTarget = false;
-                                    break;
-                                }
-                            }
-                            
-                            if (canMoveToTarget) {
-                                // Move towards player
-                                policeCar.rotation = angle + Math.PI/2;
-                                const chaseSpeed = 200 + (policeCar.chaseIntensity * 40);
-                                this.physics.velocityFromRotation(angle, chaseSpeed, policeCar.body.velocity);
-                            } else {
-                                // Find alternative path around buildings
-                                const alternativeAngles = [angle + Math.PI/3, angle - Math.PI/3, angle + Math.PI/2, angle - Math.PI/2];
-                                let foundPath = false;
-                                
-                                for (let altAngle of alternativeAngles) {
-                                    const altCheckX = policeCar.x + Math.cos(altAngle) * moveDistance;
-                                    const altCheckY = policeCar.y + Math.sin(altAngle) * moveDistance;
-                                    
-                                    let pathClear = true;
-                                    for (let building of this.buildings) {
-                                        const buildingDistance = Phaser.Math.Distance.Between(altCheckX, altCheckY, building.x, building.y);
-                                        if (buildingDistance < 50) {
-                                            pathClear = false;
-                                            break;
-                                        }
-                                    }
-                                    
-                                    if (pathClear) {
-                                        policeCar.rotation = altAngle + Math.PI/2;
-                                        const chaseSpeed = 120; // Slower when navigating around obstacles
-                                        this.physics.velocityFromRotation(altAngle, chaseSpeed, policeCar.body.velocity);
-                                        foundPath = true;
-                                        break;
-                                    }
-                                }
-                                
-                                if (!foundPath) {
-                                    // Stop if completely blocked
-                                    policeCar.body.setVelocity(0, 0);
-                                }
-                            }
-                        } else {
-                            // Ram behavior when close - but also check for buildings
-                            const ramAngle = Phaser.Math.Angle.Between(
-                                policeCar.x, policeCar.y,
-                                target.x, target.y
-                            );
-                            this.physics.velocityFromRotation(ramAngle, 300, policeCar.body.velocity);
-                        }
-                    } else {
-                        // Stop chasing when no wanted level
-                        policeCar.body.setVelocity(0, 0);
-                    }
-                    
-                    // Apply fair collision detection for police cars too!
-                    this.handlePoliceCollisions(policeCar);
-                });
-            }
-
-            handlePoliceCollisions(policeCar) {
-                // Collision handling is now done with colliders in the create function.
-                // This function is no longer needed for building collisions.
-            }
-
-            handleCollisions() {
-                const currentObject = this.playerInVehicle ? this.currentVehicle : this.player;
-                
-                // Simple but effective collision detection using Phaser's built-in overlap
-                
-                // Player/Vehicle vs NPCs - Simple overlap detection
-                this.npcs.forEach((npc, index) => {
-                    if (this.physics.overlap(currentObject, npc)) {
-                        // Push NPC away
-                        const angle = Phaser.Math.Angle.Between(
-                            currentObject.x, currentObject.y,
-                            npc.x, npc.y
-                        );
-                        
-                        const pushForce = this.playerInVehicle ? 300 : 80;
-                        npc.body.setVelocity(
-                            Math.cos(angle) * pushForce,
-                            Math.sin(angle) * pushForce
-                        );
-                        
-                        // Crime for hitting pedestrian (reduced frequency)
-                        if (Math.random() < 0.3) { // Only 30% chance to increase wanted level
-                            this.increaseCrime("Hit Pedestrian");
-                        }
-                        
-                        // Remove NPC if hit by vehicle
-                        if (this.playerInVehicle) {
-                            this.createBloodEffect(npc.x, npc.y);
-                            npc.destroy();
-                            this.npcs.splice(index, 1);
-                            this.playerMoney += 15;
-                        }
-                    }
-                });
-                
-                // Vehicle vs Vehicle collisions - Simple overlap
-                this.vehicles.forEach(vehicle => {
-                    if (vehicle === currentObject || !vehicle.active) return;
-                    
-                    if (this.physics.overlap(currentObject, vehicle)) {
-                        this.handleSimpleVehicleCollision(currentObject, vehicle);
-                    }
-                });
-                
-                // Police ramming player - Simple overlap
-                this.policeCars.forEach(policeCar => {
-                    if (!policeCar.active) return;
-                    
-                    if (this.physics.overlap(currentObject, policeCar)) {
-                        this.handleSimpleVehicleCollision(currentObject, policeCar, true);
-                    }
-                });
-            }
-
-            handleSimpleVehicleCollision(vehicle1, vehicle2, isPolice = false) {
-                // Calculate collision angle
-                const angle = Phaser.Math.Angle.Between(
-                    vehicle1.x, vehicle1.y,
-                    vehicle2.x, vehicle2.y
-                );
-                
-                // Get speeds before collision
-                const speed1 = Math.sqrt(vehicle1.body.velocity.x ** 2 + vehicle1.body.velocity.y ** 2);
-                const speed2 = Math.sqrt(vehicle2.body.velocity.x ** 2 + vehicle2.body.velocity.y ** 2);
-                
-                // STOP both vehicles immediately on collision
-                vehicle1.body.setVelocity(0, 0);
-                vehicle2.body.setVelocity(0, 0);
-                vehicle1.body.setAcceleration(0, 0);
-                vehicle2.body.setAcceleration(0, 0);
-                
-                // Separate vehicles slightly to prevent sticking
-                const separationDistance = 5;
-                vehicle1.x += Math.cos(angle + Math.PI) * separationDistance;
-                vehicle1.y += Math.sin(angle + Math.PI) * separationDistance;
-                vehicle2.x += Math.cos(angle) * separationDistance;
-                vehicle2.y += Math.sin(angle) * separationDistance;
-                
-                // Damage vehicles based on collision speed
-                if (speed1 + speed2 > 200) {
-                    this.damageVehicle(vehicle1, Math.floor((speed1 + speed2) / 50));
-                    this.damageVehicle(vehicle2, Math.floor((speed1 + speed2) / 50));
-                }
-                
-                // Crime for ramming police
-                if (isPolice && Math.random() < 0.5) {
-                    this.increaseCrime("Rammed Police");
-                }
-                
-                // Add brief "stunned" effect to prevent immediate movement
-                vehicle1.collisionCooldown = true;
-                vehicle2.collisionCooldown = true;
-                
-                this.time.delayedCall(500, () => {
-                    vehicle1.collisionCooldown = false;
-                    vehicle2.collisionCooldown = false;
-                });
-            }
-
-            damageVehicle(vehicle, damage) {
-                if (!vehicle.currentHealth) {
-                    vehicle.currentHealth = vehicle.health || 100;
-                }
-                
-                vehicle.currentHealth -= damage;
-                
-                // Visual damage effect
-                vehicle.setTint(0xff6666);
-                this.time.delayedCall(300, () => {
-                    if (vehicle.active) vehicle.clearTint();
-                });
-                
-                // Smoke effect for heavily damaged vehicles
-                if (vehicle.currentHealth < 30) {
-                    this.createSmokeEffect(vehicle.x, vehicle.y);
-                }
-                
-                // Destroy vehicle if health too low
-                if (vehicle.currentHealth <= 0) {
-                    this.createExplosion(vehicle.x, vehicle.y);
-                    
-                    // Remove from arrays
-                    const vehicleIndex = this.vehicles.indexOf(vehicle);
-                    if (vehicleIndex > -1) this.vehicles.splice(vehicleIndex, 1);
-                    
-                    const policeIndex = this.policeCars.indexOf(vehicle);
-                    if (policeIndex > -1) this.policeCars.splice(policeIndex, 1);
-                    
-                    // If player was in destroyed vehicle
-                    if (vehicle === this.currentVehicle) {
-                        this.exitVehicle();
-                        this.damagePlayer(25);
-                    }
-                    
-                    vehicle.destroy();
-                }
-            }
-
-            damagePlayer(damage) {
-                this.playerHealth = Math.max(0, this.playerHealth - damage);
-                
-                // Screen flash effect
-                this.cameras.main.flash(200, 255, 0, 0, false);
-                
-                if (this.playerHealth <= 0) {
-                    this.gameOver();
-                }
-            }
-
-            createBloodEffect(x, y) {
-                const blood = this.add.circle(x, y, 8, 0x8B0000);
-                blood.setAlpha(0.8);
-                
-                // Splatter effect
-                for (let i = 0; i < 5; i++) {
-                    const splatter = this.add.circle(
-                        x + (Math.random() - 0.5) * 30,
-                        y + (Math.random() - 0.5) * 30,
-                        2 + Math.random() * 3,
-                        0x8B0000
-                    );
-                    splatter.setAlpha(0.6);
-                    
-                    this.time.delayedCall(5000, () => {
-                        if (splatter.active) splatter.destroy();
-                    });
-                }
-                
-                this.time.delayedCall(5000, () => {
-                    if (blood.active) blood.destroy();
-                });
-            }
-
-            createSmokeEffect(x, y) {
-                const smoke = this.add.circle(x, y + 10, 5, 0x555555);
-                smoke.setAlpha(0.5);
-                
-                this.tweens.add({
-                    targets: smoke,
-                    y: y - 20,
-                    alpha: 0,
-                    scaleX: 1.5,
-                    scaleY: 1.5,
-                    duration: 1000,
-                    onComplete: () => smoke.destroy()
-                });
-            }
-
-            gameOver() {
-                // Game over screen
-                const gameOverText = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY, 
-                    'WASTED\n\nPress R to restart', {
-                    fontSize: '32px',
-                    color: '#ff0000',
-                    align: 'center'
-                });
-                gameOverText.setOrigin(0.5);
-                gameOverText.setScrollFactor(0);
-                gameOverText.setDepth(2000);
-                
-                // Restart functionality
-                this.wasdKeys.R.on('down', () => {
-                    this.scene.restart();
-                });
-            }
-
-            explodeVehicle(vehicle) {
-                // Create explosion effect
-                const explosion = this.add.circle(vehicle.x, vehicle.y, 50, 0xff4400);
-                explosion.setAlpha(0.8);
-                
-                this.tweens.add({
-                    targets: explosion,
-                    scaleX: 3,
-                    scaleY: 3,
-                    alpha: 0,
-                    duration: 1000,
-                    onComplete: () => explosion.destroy()
-                });
-                
-                // If player was in vehicle, exit and take damage
-                if (vehicle === this.currentVehicle) {
-                    this.exitVehicle();
-                    this.playerHealth = Math.max(0, this.playerHealth - 50);
-                }
-                
-                // Remove vehicle
-                const index = this.vehicles.indexOf(vehicle);
-                if (index > -1) this.vehicles.splice(index, 1);
-                
-                const policeIndex = this.policeCars.indexOf(vehicle);
-                if (policeIndex > -1) this.policeCars.splice(policeIndex, 1);
-                
-                vehicle.destroy();
-                
-                this.showNotification("VEHICLE DESTROYED!", '#ff0000');
-            }
-
-            gameOver() {
-                this.showNotification("WASTED!", '#ff0000');
-                
-                // Reset after delay
-                this.time.delayedCall(3000, () => {
-                    this.playerHealth = 100;
-                    this.wantedLevel = 0;
-                    this.playerMoney = Math.max(0, this.playerMoney - 500);
-                    
-                    // Reset player position
-                    if (this.playerInVehicle) {
-                        this.exitVehicle();
-                    }
-                    
-                    this.player.setPosition(1200, 1200);
-                    this.showNotification("Respawned at hospital - $500 fine", '#ffff00');
-                });
+    constructor() {
+        super({
+            key: 'GameScene'
+        });
+
+        // Game state
+        this.player = null;
+        this.vehicles = [];
+        this.npcs = null; 
+        this.policeCars = [];
+        this.buildings = null;
+        this.missions = [];
+        this.bullets = null; 
+        this.muzzleFlashes = [];
+        this.buildingCenters = [];
+        this.dynamicSprites = [];
+
+        // MODIFIED: Removed sidewalkAreas
+        this.roadAreas = [];
+        this.grassAreas = [];
+        this.intersectionAreas = [];
+
+        // Controls
+        this.cursors = null;
+        this.wasdKeys = null;
+
+        // Player state
+        this.playerInVehicle = false;
+        this.currentVehicle = null;
+        this.wantedLevel = 0;
+        this.playerHealth = 100;
+        this.playerMoney = 0;
+        this.lastCrimeTime = 0;
+
+        // Weapon system
+        this.currentWeapon = 0;
+        this.weapons = [{
+            name: "Pistol",
+            damage: 25,
+            ammo: 50,
+            maxAmmo: 50,
+            fireRate: 400,
+            spread: 0.05,
+            pelletsPerShot: 1
+        }, {
+            name: "SMG",
+            damage: 15,
+            ammo: 100,
+            maxAmmo: 100,
+            fireRate: 120,
+            spread: 0.15,
+            pelletsPerShot: 1,
+            automatic: true
+        }, {
+            name: "Shotgun",
+            damage: 35,
+            ammo: 20,
+            maxAmmo: 20,
+            fireRate: 900,
+            spread: 0.4,
+            pelletsPerShot: 5
+        }, ];
+        this.lastShotTime = 0;
+        this.isAutoFiring = false;
+
+        // Mission state
+        this.currentMission = null;
+        this.missionTarget = null;
+
+        // UI elements
+        this.gameUI = {};
+
+        // Game world size
+        this.worldWidth = 1920;
+        this.worldHeight = 1920;
+
+        // Audio properties
+        this.onFootMusic = null;
+        this.inVehicleMusic = null;
+    }
+
+    create() {
+        this.add.tileSprite(0, 0, this.worldWidth, this.worldHeight, 'grass').setOrigin(0, 0).setDepth(-1);
+
+        this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
+
+        this.bullets = this.physics.add.group();
+        this.npcs = this.physics.add.group();
+
+        this.createCity();
+        this.createPlayer();
+        this.createVehicles();
+        this.createNPCs();
+        this.setupControls();
+        this.setupMusic(); 
+        this.createUI();
+
+        this.cameras.main.setBounds(0, 0, this.worldWidth, this.worldHeight);
+        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+        this.cameras.main.setDeadzone(50, 50);
+
+        this.createMissions();
+        this.setupTimers();
+        this.setupCollisions();
+    }
+
+    setupMusic() {
+        this.onFootMusic = this.sound.add('sovietconnection', { loop: true, volume: 0.4 });
+        this.inVehicleMusic = this.sound.add('danzakuduro', { loop: true, volume: 0.5 });
+        
+        this.onFootMusic.play();
+    }
+
+    // MODIFIED: Reduced collider sizes for all buildings
+    setSpriteCollider(sprite, type) {
+        switch (type) {
+            case 'building_office': case 'building_apartment':
+                // Original: 180x480
+                sprite.body.setSize(160, 430).setOffset((sprite.width - 160) / 2, (sprite.height - 430) / 2);
+                break;
+            case 'building_commercial':
+                // Original: 480x220
+                sprite.body.setSize(430, 200).setOffset((sprite.width - 430) / 2, (sprite.height - 200) / 2);
+                break;
+            case 'building_residential': case 'building_house':
+                // Original: 230x230
+                sprite.body.setSize(200, 200).setOffset((sprite.width - 200) / 2, (sprite.height - 200) / 2);
+                break;
+            case 'car_red': case 'car_police': case 'truck_blue':
+                sprite.body.setSize(sprite.displayWidth * 0.9, sprite.displayHeight * 0.85);
+                break;
+            case 'player':
+                sprite.body.setSize(sprite.displayWidth * 0.8, sprite.displayHeight * 0.8);
+                break;
+            case 'npc':
+                sprite.body.setSize(sprite.displayWidth * 0.5, sprite.displayHeight * 0.8);
+                break;
+            default: console.warn(`Collider not set for type: ${type}.`); break;
+        }
+    }
+
+    createCity() {
+        // MODIFIED: Removed sidewalkAreas
+        this.roadAreas = [];
+        this.grassAreas = [];
+        this.intersectionAreas = [];
+        this.buildingCenters = [];
+        this.buildings = this.physics.add.staticGroup();
+        this.createCityBlocks();
+    }
+
+    createCityBlocks() {
+        this.createProperStreets();
+        this.buildInMedians();
+        this.createCityDistricts();
+    }
+
+    createProperStreets() {
+        const secondaryRoadWidth = 35;
+        for (let y = 300; y < this.worldHeight; y += 450) {
+            if (Math.abs(y - this.worldHeight / 2) > 300) { 
+                this.createStreet(0, y, this.worldWidth, secondaryRoadWidth, true);
             }
         }
+        for (let x = 300; x < this.worldWidth; x += 450) {
+            if (Math.abs(x - this.worldWidth / 2) > 300) { 
+                this.createStreet(x, 0, secondaryRoadWidth, this.worldHeight, false);
+            }
+        }
+        
+        const mainRoadWidth = 40;
+        const medianWidth = 400;
+
+        const topRoadY = this.worldHeight / 2 - medianWidth / 2 - mainRoadWidth;
+        const bottomRoadY = this.worldHeight / 2 + medianWidth / 2;
+        this.createStreet(0, topRoadY, this.worldWidth, mainRoadWidth, true);
+        this.createStreet(0, bottomRoadY, this.worldWidth, mainRoadWidth, true);
+        const horizontalMedian = new Phaser.Geom.Rectangle(0, topRoadY + mainRoadWidth, this.worldWidth, medianWidth);
+        this.grassAreas.push(horizontalMedian);
+
+        const leftRoadX = this.worldWidth / 2 - medianWidth / 2 - mainRoadWidth;
+        const rightRoadX = this.worldWidth / 2 + medianWidth / 2;
+        this.createStreet(leftRoadX, 0, mainRoadWidth, this.worldHeight, false);
+        this.createStreet(rightRoadX, 0, mainRoadWidth, this.worldHeight, false);
+        const verticalMedian = new Phaser.Geom.Rectangle(leftRoadX + mainRoadWidth, 0, medianWidth, this.worldHeight);
+        this.grassAreas.push(verticalMedian);
+    }
+
+    createStreet(x, y, width, height, isHorizontal) {
+        this.add.tileSprite(x, y, width, height, 'road').setOrigin(0, 0).setDepth(0);
+        this.roadAreas.push(new Phaser.Geom.Rectangle(x, y, width, height));
+        if (isHorizontal) {
+            for (let i = x; i < x + width; i += 30) {
+                this.add.rectangle(i, y + height / 2 - 1, 15, 2, 0xffff00).setOrigin(0, 0).setDepth(1);
+            }
+        } else {
+            for (let i = y; i < y + height; i += 30) {
+                this.add.rectangle(x + width / 2 - 1, i, 2, 15, 0xffff00).setOrigin(0, 0).setDepth(1);
+            }
+        }
+        this.createIntersections();
+        // REMOVED: No longer creating sidewalks for streets
+        // this.createSidewalksForStreet(x, y, width, height, isHorizontal);
+    }
+
+    createIntersections() {
+        this.intersectionAreas = []; 
+        for (let i = 0; i < this.roadAreas.length; i++) {
+            for (let j = i + 1; j < this.roadAreas.length; j++) {
+                const intersection = Phaser.Geom.Rectangle.Intersection(this.roadAreas[i], this.roadAreas[j]);
+                if (intersection.width > 0 && intersection.height > 0) {
+                    this.intersectionAreas.push(intersection);
+                    this.add.sprite(intersection.centerX, intersection.centerY, 'intersection').setDisplaySize(intersection.width, intersection.height).setDepth(1);
+                }
+            }
+        }
+    }
+
+    // REMOVED: Sidewalk functions are no longer needed
+    // createSidewalksForStreet(...)
+    // createSidewalk(...)
+
+    buildInMedians() {
+        this.grassAreas.forEach(median => {
+            const step = 75;
+            for (let x = median.x + step / 2; x < median.right; x += step) {
+                for (let y = median.y + step / 2; y < median.bottom; y += step) {
+                    if (Math.random() < 1.0) {
+                        const bType = Phaser.Utils.Array.GetRandom(['building_office', 'building_commercial', 'building_apartment']);
+                        this.createProperBuilding(x, y, bType);
+                    }
+                }
+            }
+        });
+    }
+
+    createCityDistricts() {
+        const districts = [{ x: 50, y: 50, width: 400, height: 400, type: 'residential', density: 1.0 }, { x: this.worldWidth - 450, y: 50, width: 400, height: 400, type: 'residential', density: 1.0 }, { x: 50, y: this.worldHeight - 450, width: 400, height: 400, type: 'residential', density: 1.0 }, { x: this.worldWidth - 450, y: this.worldHeight - 450, width: 400, height: 400, type: 'residential', density: 1.0 }, { x: 100, y: this.worldHeight / 2 - 150, width: 300, height: 300, type: 'commercial', density: 1.0 }, { x: this.worldWidth - 400, y: this.worldHeight / 2 - 150, width: 300, height: 300, type: 'commercial', density: 1.0 }, ];
+        districts.forEach(d => this.buildDistrict(d));
+    }
+
+    buildDistrict(district) {
+        const blockSize = 80;
+        const spacing = 5;
+        for (let x = district.x; x < district.x + district.width; x += blockSize + spacing) {
+            for (let y = district.y; y < district.y + district.height; y += blockSize + spacing) {
+                if (this.isAreaOnRoad(new Phaser.Geom.Rectangle(x, y, blockSize, blockSize))) continue;
+                if (Math.random() < district.density) {
+                    let bType;
+                    switch (district.type) {
+                        case 'residential': bType = Phaser.Utils.Array.GetRandom(['building_residential', 'building_house']); break;
+                        case 'commercial': bType = 'building_commercial'; break;
+                        default: bType = 'building_residential';
+                    }
+                    this.createProperBuilding(x + blockSize / 2, y + blockSize / 2, bType);
+                }
+            }
+        }
+    }
+
+    isAreaOnRoad(rect) {
+        for (let r of this.roadAreas) {
+            if (Phaser.Geom.Intersects.RectangleToRectangle(rect, r)) return true;
+        }
+        return false;
+    }
+    
+    // REMOVED: No longer needed
+    // isAreaOnSidewalk(...)
+
+    isInIntersection(x, y) {
+        for (let i of this.intersectionAreas) {
+            if (i.contains(x,y)) return true;
+        }
+        return false;
+    }
+
+    createProperBuilding(x, y, buildingType) {
+        const minSpawnDistance = 150;
+        for (const center of this.buildingCenters) {
+            if (Phaser.Math.Distance.Between(x, y, center.x, center.y) < minSpawnDistance) {
+                return;
+            }
+        }
+        const buildingCheckSize = 100;
+        const buildingCheckMargin = 25;
+        const checkRect = new Phaser.Geom.Rectangle(x - buildingCheckSize / 2 - buildingCheckMargin, y - buildingCheckSize / 2 - buildingCheckMargin, buildingCheckSize + buildingCheckMargin * 2, buildingCheckSize + buildingCheckMargin * 2);
+        if (this.isAreaOnRoad(checkRect)) {
+            return;
+        }
+        const building = this.buildings.create(x, y, buildingType);
+        building.setOrigin(0.5, 0.5).setScale(0.2);
+        this.setSpriteCollider(building, buildingType);
+        building.setImmovable(true).refreshBody();
+        building.setDepth(y);
+        this.buildingCenters.push({ x: x, y: y });
+    }
+
+    createPlayer() {
+        this.player = this.physics.add.sprite(960, 960, 'player');
+        this.player.setCollideWorldBounds(true).setScale(0.07);
+        this.setSpriteCollider(this.player, 'player');
+        this.player.body.setDrag(400).setMaxVelocity(180);
+        this.player.maxHealth = 100;
+        this.player.money = 0;
+        this.dynamicSprites.push(this.player);
+    }
+
+    createVehicles() {
+        const vehicleCount = 15;
+        const configs = [{ type: 'car_red', maxSpeed: 280, acceleration: 250, health: 100 }, { type: 'truck_blue', maxSpeed: 200, acceleration: 180, health: 150 }, ];
+        for (let i = 0; i < vehicleCount; i++) {
+            let x, y, a = 0;
+            const checkRect = new Phaser.Geom.Rectangle(0, 0, 60, 30);
+            do {
+                x = Phaser.Math.Between(100, this.worldWidth - 100);
+                y = Phaser.Math.Between(100, this.worldHeight - 100);
+                checkRect.setPosition(x - 30, y - 15);
+                a++;
+            } while (((Math.abs(x - this.player.x) < 200 && Math.abs(y - this.player.y) < 200) || this.isAreaOnRoad(checkRect)) && a < 100);
+            if (a >= 100) continue;
+            const config = Phaser.Utils.Array.GetRandom(configs);
+            const vehicle = this.physics.add.sprite(x, y, config.type);
+            vehicle.setScale(0.09);
+            this.setSpriteCollider(vehicle, config.type);
+            vehicle.body.setDrag(150);
+            vehicle.setRotation((Math.floor(Math.random() * 4) * Math.PI / 2));
+            Object.assign(vehicle, config, { currentHealth: config.health, isPlayerVehicle: false, lastDriver: null });
+            vehicle.refreshBody();
+            this.vehicles.push(vehicle);
+            this.dynamicSprites.push(vehicle);
+        }
+    }
+
+    // MODIFIED: Reworked NPC generation to prevent clumping
+    createNPCs() {
+        const walkableAreas = this.grassAreas;
+        if (walkableAreas.length === 0) return;
+        const npcCount = 80;
+        const minNpcDistance = 30; // Min distance between NPCs
+        const maxRetries = 20;     // Prevent infinite loops
+
+        for (let i = 0; i < npcCount; i++) {
+            let validPosition = false;
+            let x, y;
+            let retries = 0;
+
+            while (!validPosition && retries < maxRetries) {
+                const spawnArea = Phaser.Utils.Array.GetRandom(walkableAreas);
+                x = Phaser.Math.Between(spawnArea.left, spawnArea.right);
+                y = Phaser.Math.Between(spawnArea.top, spawnArea.bottom);
+                
+                validPosition = true; // Assume true until a check fails
+
+                // Check 1: Distance from player
+                if (Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y) < 300) {
+                    validPosition = false;
+                    retries++;
+                    continue;
+                }
+
+                // Check 2: Distance from other NPCs
+                for (const existingNpc of this.npcs.children.entries) {
+                    if (Phaser.Math.Distance.Between(x, y, existingNpc.x, existingNpc.y) < minNpcDistance) {
+                        validPosition = false;
+                        break; // Exit inner for-loop
+                    }
+                }
+                
+                if (!validPosition) {
+                    retries++;
+                }
+            }
+
+            if (validPosition) {
+                const npc = this.physics.add.sprite(x, y, 'npc');
+                npc.setScale(0.05);
+                this.setSpriteCollider(npc, 'npc');
+                npc.setTint(Phaser.Math.Between(0x888888, 0xffffff));
+                Object.assign(npc, { walkDirection: Math.random() * Math.PI * 2, walkSpeed: 30 + Math.random() * 20, changeDirectionTimer: 0, panicMode: false, panicTimer: 0 });
+                this.npcs.add(npc);
+                this.dynamicSprites.push(npc);
+            } else {
+                console.warn(`Could not find a valid position for NPC #${i} after ${maxRetries} retries.`);
+            }
+        }
+    }
+
+    updateDepthSorting() {
+        this.dynamicSprites.forEach(sprite => {
+            if (sprite.active) {
+                sprite.setDepth(sprite.y);
+            }
+        });
+        this.dynamicSprites = this.dynamicSprites.filter(sprite => sprite.active);
+    }
+    
+    createMissions() {
+        this.missions = [{ id: 1, name: "First Ride", description: "Steal a vehicle and drive to the marked location", target: { x: 1800, y: 800 }, reward: 500, completed: false }, { id: 2, name: "Escape the Heat", description: "Lose a 3-star wanted level", target: null, reward: 1000, completed: false }, ];
+        this.currentMission = this.missions[0];
+        this.createMissionMarker();
+    }
+
+    createMissionMarker() {
+        if (this.currentMission && this.currentMission.target) {
+            if (this.missionTarget) this.missionTarget.destroy();
+            this.missionTarget = this.add.circle(this.currentMission.target.x, this.currentMission.target.y, 30, 0x00ff00).setAlpha(0.7);
+            this.tweens.add({ targets: this.missionTarget, alpha: 0.3, duration: 1000, yoyo: true, repeat: -1 });
+        }
+    }
+
+    setupControls() {
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.wasdKeys = this.input.keyboard.addKeys('W,S,A,D,E,SPACE,R,ESC,Q,F,ONE,TWO,THREE');
+        this.wasdKeys.E.on('down', () => this.handleVehicleInteraction());
+        this.wasdKeys.Q.on('down', () => this.switchWeapon());
+        this.wasdKeys.ONE.on('down', () => { this.currentWeapon = 0; this.updateUI(); });
+        this.wasdKeys.TWO.on('down', () => { this.currentWeapon = 1; this.updateUI(); });
+        this.wasdKeys.THREE.on('down', () => { this.currentWeapon = 2; this.updateUI(); });
+        this.input.on('pointerdown', p => { if (!this.playerInVehicle) { this.isAutoFiring = true; this.autoFireTarget = { x: p.worldX, y: p.worldY }; this.shoot(p.worldX, p.worldY); } });
+        this.input.on('pointerup', () => { this.isAutoFiring = false; });
+        this.wasdKeys.F.on('down', () => { if (!this.playerInVehicle) { this.isAutoFiring = true; this.shootForward(); } });
+        this.wasdKeys.F.on('up', () => { this.isAutoFiring = false; });
+        this.wasdKeys.R.on('down', () => { this.wantedLevel = 0; this.updateUI(); });
+    }
+
+    switchWeapon() { this.currentWeapon = (this.currentWeapon + 1) % this.weapons.length; this.updateUI(); }
+    
+    shoot(targetX, targetY) {
+        const w = this.weapons[this.currentWeapon];
+        const t = this.time.now;
+        if (t - this.lastShotTime < w.fireRate || w.ammo <= 0) return;
+        w.ammo--;
+        this.lastShotTime = t;
+        const a = Phaser.Math.Angle.Between(this.player.x, this.player.y, targetX, targetY);
+        for (let i = 0; i < w.pelletsPerShot; i++) {
+            this.createBullet(this.player.x, this.player.y, a + (Math.random() - 0.5) * w.spread, w.damage);
+        }
+        this.createMuzzleFlash(this.player.x, this.player.y);
+        if (Math.random() < 0.3) this.increaseCrime("Gunfire");
+        this.updateUI();
+    }
+
+    shootForward() {
+        const w = this.weapons[this.currentWeapon];
+        const t = this.time.now;
+        if (t - this.lastShotTime < w.fireRate || w.ammo <= 0) return;
+        w.ammo--;
+        this.lastShotTime = t;
+        const a = this.player.rotation - Math.PI / 2;
+        for (let i = 0; i < w.pelletsPerShot; i++) {
+            this.createBullet(this.player.x, this.player.y, a + (Math.random() - 0.5) * w.spread, w.damage);
+        }
+        this.createMuzzleFlash(this.player.x, this.player.y);
+        if (Math.random() < 0.3) this.increaseCrime("Gunfire");
+        this.updateUI();
+    }
+
+    createBullet(x, y, angle, damage) {
+        const b = this.physics.add.sprite(x, y, 'bullet').setScale(0.8);
+        b.body.setSize(6, 6);
+        b.damage = damage;
+        b.setDepth(2500); 
+        this.bullets.add(b);
+        this.physics.velocityFromRotation(angle, 800, b.body.velocity);
+        this.time.delayedCall(2000, () => { if (b.active) b.destroy(); });
+    }
+
+    createMuzzleFlash(x, y) {
+        const f = this.add.sprite(x, y, 'muzzle_flash').setScale(0.5).setDepth(2600);
+        this.muzzleFlashes.push(f);
+        this.time.delayedCall(100, () => { if (f.active) f.destroy(); });
+    }
+
+    setupTimers() {
+        this.time.addEvent({ delay: 8000, callback: this.decreaseWantedLevel, callbackScope: this, loop: true });
+        this.time.addEvent({ delay: 4000, callback: this.spawnPolice, callbackScope: this, loop: true });
+        this.time.addEvent({ delay: 100, callback: this.updateNPCBehavior, callbackScope: this, loop: true });
+    }
+
+    createUI() {
+        const { width } = this.sys.game.config;
+        const d = 3000;
+        this.gameUI.healthBarBg = this.add.rectangle(60, 60, 220, 25, 0x660000).setOrigin(0, 0).setScrollFactor(0).setDepth(d);
+        this.gameUI.healthBar = this.add.rectangle(62, 62, 216, 21, 0x00ff00).setOrigin(0, 0).setScrollFactor(0).setDepth(d + 1);
+        this.gameUI.healthText = this.add.text(70, 67, 'HEALTH', { fontSize: '14px', color: '#ffffff', fontWeight: 'bold' }).setScrollFactor(0).setDepth(d + 2);
+        this.gameUI.wantedStars = [];
+        this.gameUI.wantedText = this.add.text(320, 67, 'WANTED:', { fontSize: '14px', color: '#ffffff', fontWeight: 'bold' }).setScrollFactor(0).setDepth(d + 2);
+        for (let i = 0; i < 5; i++) { this.gameUI.wantedStars.push(this.add.text(400 + i * 22, 60, '★', { fontSize: '18px', color: '#333333' }).setScrollFactor(0).setDepth(d + 2)); }
+        this.gameUI.moneyText = this.add.text(60, 100, '$0', { fontSize: '16px', color: '#00ff00', fontWeight: 'bold' }).setScrollFactor(0).setDepth(d + 2);
+        this.gameUI.speedText = this.add.text(60, 130, 'ON FOOT', { fontSize: '14px', color: '#ffffff' }).setScrollFactor(0).setDepth(d + 2);
+        this.gameUI.missionText = this.add.text(60, 160, '', { fontSize: '12px', color: '#ffff00', wordWrap: { width: 300 } }).setScrollFactor(0).setDepth(d + 2);
+        this.gameUI.weaponText = this.add.text(60, 190, '', { fontSize: '14px', color: '#00ff00' }).setScrollFactor(0).setDepth(d + 2);
+        this.gameUI.controlsText = this.add.text(60, 220, 'WEAPONS: Q-Switch|F-Shoot|1,2,3|Mouse-Aim&Shoot', { fontSize: '10px', color: '#cccccc' }).setScrollFactor(0).setDepth(d + 2);
+        const mS = 150; const mX = width - mS - 10; const mY = mS / 2 + 10;
+        this.gameUI.minimapBg = this.add.rectangle(mX, mY, mS, mS, 0x000000).setScrollFactor(0).setDepth(d).setAlpha(0.8);
+        this.createMinimapLayout(mX, mY, mS);
+        this.gameUI.minimapBorder = this.add.rectangle(mX, mY, mS, mS).setScrollFactor(0).setDepth(d + 3).setStrokeStyle(2, 0xff6b35);
+        this.gameUI.minimapPlayer = this.add.circle(mX, mY, 3, 0x00ff00).setScrollFactor(0).setDepth(d + 4);
+    }
+
+    createMinimapLayout(mX, mY, mS) {
+        const wS = mS / Math.max(this.worldWidth, this.worldHeight);
+        this.roadAreas.forEach(r => { this.add.rectangle(mX - mS / 2 + (r.x * wS) + (r.width * wS) / 2, mY - mS / 2 + (r.y * wS) + (r.height * wS) / 2, r.width * wS, r.height * wS, 0x444444).setScrollFactor(0).setDepth(3001); });
+        this.buildings.children.each(b => { this.add.rectangle(mX - mS / 2 + (b.x * wS), mY - mS / 2 + (b.y * wS), 2, 2, 0x888888).setScrollFactor(0).setDepth(3001); });
+    }
+
+    handleVehicleInteraction() { if (this.playerInVehicle) this.exitVehicle(); else this.enterNearbyVehicle(); }
+    enterNearbyVehicle() { let cV = null, cD = Infinity; for (let v of this.vehicles) { if (v.isPlayerVehicle) continue; const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, v.x, v.y); if (d < 60 && d < cD) { cD = d; cV = v; } } if (cV) this.enterVehicle(cV); }
+    
+    enterVehicle(v) { 
+        this.playerInVehicle = true; 
+        this.currentVehicle = v; 
+        this.player.setVisible(false); 
+        v.isPlayerVehicle = true; 
+        if (v.lastDriver !== 'player') { this.increaseCrime("Car Theft"); v.lastDriver = 'player'; } 
+        this.cameras.main.startFollow(v, true, 0.1, 0.1); 
+        this.showNotification(`Entered ${v.type.replace('_', ' ').toUpperCase()}!`); 
+        
+        if (this.onFootMusic.isPlaying) this.onFootMusic.stop();
+        if (!this.inVehicleMusic.isPlaying) this.inVehicleMusic.play();
+    }
+    
+    exitVehicle() { 
+        if (this.currentVehicle) { 
+            const eD = 45; 
+            let eX = this.currentVehicle.x + Math.cos(this.currentVehicle.rotation + Math.PI / 2) * eD; 
+            let eY = this.currentVehicle.y + Math.sin(this.currentVehicle.rotation + Math.PI / 2) * eD; 
+            let a = 0; 
+            while ((this.isAreaOnRoad(new Phaser.Geom.Rectangle(eX - 10, eY - 10, 20, 20))) && a < 10) { 
+                const nA = this.currentVehicle.rotation + (Math.random() * Math.PI) - (Math.PI / 2); 
+                eX = this.currentVehicle.x + Math.cos(nA) * eD; 
+                eY = this.currentVehicle.y + Math.sin(nA) * eD; a++; 
+            } 
+            this.player.setPosition(eX, eY); 
+            this.player.setVisible(true); 
+            this.currentVehicle.isPlayerVehicle = false; 
+            this.currentVehicle = null; 
+            this.playerInVehicle = false; 
+            this.cameras.main.startFollow(this.player, true, 0.1, 0.1); 
+
+            if (this.inVehicleMusic.isPlaying) this.inVehicleMusic.stop();
+            if (!this.onFootMusic.isPlaying) this.onFootMusic.play();
+        } 
+    }
+    
+    spawnPolice() {
+        if (this.wantedLevel >= 2 && this.policeCars.length < this.wantedLevel) {
+            const sS = Math.floor(Math.random() * 4);
+            let x, y, a = 0, sF = false;
+            while (!sF && a < 50) {
+                switch (sS) {
+                    case 0: x = Phaser.Math.Between(0, this.worldWidth); y = 0; break;
+                    case 1: x = this.worldWidth; y = Phaser.Math.Between(0, this.worldHeight); break;
+                    case 2: x = Phaser.Math.Between(0, this.worldWidth); y = this.worldHeight; break;
+                    case 3: x = 0; y = Phaser.Math.Between(0, this.worldHeight); break;
+                }
+                if (this.isAreaOnRoad(new Phaser.Geom.Rectangle(x,y,1,1))) sF = true;
+                a++;
+            }
+            if (!sF) return;
+            const pC = this.physics.add.sprite(x, y, 'car_police');
+            pC.setScale(0.09);
+            this.setSpriteCollider(pC, 'car_police');
+            pC.body.setDrag(100);
+            Object.assign(pC, { isPolice: true, health: 120, maxSpeed: 320, chaseIntensity: this.wantedLevel });
+            pC.refreshBody();
+            this.policeCars.push(pC);
+            this.vehicles.push(pC);
+            this.dynamicSprites.push(pC);
+        }
+    }
+
+    increaseCrime(cT = "Unknown") { this.wantedLevel = Math.min(5, this.wantedLevel + 1); this.lastCrimeTime = this.time.now; this.updateUI(); this.makeNearbyNPCsPanic(); }
+    makeNearbyNPCsPanic() { const pP = this.playerInVehicle ? this.currentVehicle : this.player; this.npcs.children.each(n => { if (n.active && Phaser.Math.Distance.Between(pP.x, pP.y, n.x, n.y) < 200) { n.panicMode = true; n.panicTimer = 5000; n.walkDirection = Phaser.Math.Angle.Between(pP.x, pP.y, n.x, n.y); n.walkSpeed = 120; } }); }
+    decreaseWantedLevel() { if (this.time.now - this.lastCrimeTime > 15000 && this.wantedLevel > 0) { this.wantedLevel--; this.updateUI(); if (this.policeCars.length > this.wantedLevel) { for (let i = 0; i < this.policeCars.length - this.wantedLevel; i++) { const c = this.policeCars.pop(); const ix = this.vehicles.indexOf(c); if (ix > -1) this.vehicles.splice(ix, 1); if (c.active) c.destroy(); } } } }
+    
+    updateNPCBehavior() {
+        this.npcs.children.each(n => {
+            if (!n.active) return;
+            
+            // If an NPC is on a road or intersection for any reason, rescue them
+            if (this.isAreaOnRoad(n.getBounds()) || this.isInIntersection(n.x, n.y)) {
+                this.teleportNPCToSafety(n);
+                return;
+            }
+
+            const nextX = n.x + Math.cos(n.walkDirection) * n.walkSpeed * 0.016;
+            const nextY = n.y + Math.sin(n.walkDirection) * n.walkSpeed * 0.016;
+            
+            // MODIFIED: Check against roads and intersections before moving (sidewalk check removed)
+            const nextPosRect = new Phaser.Geom.Rectangle(nextX -1, nextY -1, 2, 2);
+            if (this.isAreaOnRoad(nextPosRect) || this.isInIntersection(nextX, nextY)) {
+                n.walkDirection = Math.random() * Math.PI * 2; 
+                n.body.setVelocity(0,0);
+                return;
+            }
+
+            if (n.panicMode) {
+                n.panicTimer -= 100;
+                if (n.panicTimer <= 0) { n.panicMode = false; n.walkSpeed = 30 + Math.random() * 20; }
+            }
+            n.changeDirectionTimer += 100;
+            if (n.changeDirectionTimer > 3000) { n.walkDirection = Math.random() * Math.PI * 2; n.changeDirectionTimer = 0; }
+            const s = n.panicMode ? 120 : n.walkSpeed;
+            n.body.setVelocity(Math.cos(n.walkDirection) * s, Math.sin(n.walkDirection) * s);
+            
+            if (n.x < 50 || n.x > this.worldWidth - 50 || n.y < 50 || n.y > this.worldHeight - 50) {
+                n.walkDirection += Math.PI;
+            }
+        });
+    }
+
+    teleportNPCToSafety(npc) {
+        const walkableAreas = this.grassAreas;
+        if(walkableAreas.length === 0) return;
+
+        let nearestArea = null;
+        let minDistance = Infinity;
+
+        walkableAreas.forEach(area => {
+            const distance = Phaser.Math.Distance.Between(npc.x, npc.y, area.centerX, area.centerY);
+            if (distance < minDistance) {
+                minDistance = distance;
+                nearestArea = area;
+            }
+        });
+
+        if (nearestArea) {
+            npc.x = nearestArea.centerX;
+            npc.y = nearestArea.centerY;
+            npc.body.setVelocity(0,0);
+        }
+    }
+
+    showNotification(t, c = '#ffff00') {
+        const n = this.add.text(this.sys.game.config.width / 2, 200, t, { fontSize: '18px', color: c, fontWeight: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(4000);
+        this.tweens.add({ targets: n, alpha: 0, y: 150, duration: 3000, onComplete: () => n.destroy() });
+    }
+
+    checkMissionProgress() {
+        if (!this.currentMission || this.currentMission.completed) return;
+        const pP = this.playerInVehicle ? this.currentVehicle : this.player;
+        switch (this.currentMission.id) {
+            case 1: if (this.playerInVehicle && this.currentMission.target && Phaser.Math.Distance.Between(pP.x, pP.y, this.currentMission.target.x, this.currentMission.target.y) < 80) this.completeMission(); break;
+            case 2: if (this.wantedLevel === 0) this.completeMission(); break;
+        }
+    }
+
+    completeMission() {
+        if (this.currentMission) {
+            this.currentMission.completed = true;
+            this.playerMoney += this.currentMission.reward;
+            this.showNotification(`MISSION COMPLETE! +$${this.currentMission.reward}`, '#00ff00');
+            if (this.missionTarget) { this.missionTarget.destroy(); this.missionTarget = null; }
+            const nM = this.missions.find(m => !m.completed);
+            if (nM) { this.currentMission = nM; this.createMissionMarker(); }
+            else { this.currentMission = null; this.showNotification("ALL MISSIONS COMPLETE!", '#ff6b35'); }
+            this.updateUI();
+        }
+    }
+    
+    setupCollisions() {
+        this.physics.add.collider(this.player, this.buildings);
+        this.physics.add.collider(this.vehicles, this.buildings, this.handleVehicleBuildingCollision, null, this);
+        this.physics.add.collider(this.player, this.vehicles, (p, v) => { if (!this.playerInVehicle) this.handlePlayerVehicleCollision(p, v); });
+        this.physics.add.collider(this.vehicles, this.vehicles, (v1, v2) => this.handleSimpleVehicleCollision(v1, v2, v1.isPolice || v2.isPolice));
+        this.physics.add.collider(this.bullets, this.buildings, (b) => { if (b.active) b.destroy(); });
+        this.physics.add.collider(this.npcs, this.buildings);
+        this.physics.add.overlap(this.bullets, this.npcs, (bullet, npc) => { if (bullet.active && npc.active) { this.hitNPC(npc, bullet.damage); bullet.destroy(); } });
+        this.physics.add.overlap(this.bullets, this.vehicles, (b, v) => { if (b.active && v.active && v !== this.currentVehicle) { this.hitVehicle(v, b.damage); b.destroy(); if (v.isPolice) { this.increaseCrime("Shot Police"); this.increaseCrime("Shot Police"); } else { this.increaseCrime("Property Damage"); } } });
+        this.physics.add.overlap(this.player, this.npcs, (p, n) => { if (!this.playerInVehicle && n.active) this.handlePlayerNPCOverlap(p, n); });
+        this.physics.add.overlap(this.vehicles, this.npcs, (v, n) => { if (v === this.currentVehicle && n.active) this.handleVehicleNPCOverlap(v, n); });
+    }
+
+    handleVehicleBuildingCollision(vehicle, building) {
+        if (vehicle !== this.currentVehicle) {
+            this.damageVehicle(vehicle, 10);
+            return;
+        }
+        const speed = vehicle.body.velocity.length();
+        if (speed > 80) {
+            const damage = Math.min(25, Math.floor(speed / 15));
+            this.damagePlayer(damage);
+            this.damageVehicle(vehicle, damage * 2);
+            this.cameras.main.shake(100, 0.005);
+        }
+    }
+
+    handlePlayerNPCOverlap(p, n) { const a = Phaser.Math.Angle.Between(p.x, p.y, n.x, n.y); n.body.setVelocity(Math.cos(a) * 80, Math.sin(a) * 80); if (Math.random() < 0.1) this.increaseCrime("Hit Pedestrian"); }
+    handleVehicleNPCOverlap(v, n) { const s = v.body.velocity.length(); if (s > 50 && Math.random() < 0.2) { this.createBloodEffect(n.x, n.y); if(n.active) n.destroy(); this.playerMoney += 15; this.increaseCrime("Ran over Civilian"); } else { const a = Phaser.Math.Angle.Between(v.x, v.y, n.x, n.y); n.body.setVelocity(Math.cos(a) * 150, Math.sin(a) * 150); } }
+    handlePlayerVehicleCollision(p, v) { const s = v.body.velocity.length(); if (s > 50) this.damagePlayer(Math.floor(s / 20)); else if (s > 0) this.damagePlayer(1); const a = Phaser.Math.Angle.Between(v.x, v.y, p.x, p.y); p.body.setVelocity(Math.cos(a) * 200, Math.sin(a) * 200); if (!v.isPlayerVehicle && Math.random() < 0.1) this.increaseCrime("Hit Pedestrian"); }
+    
+    hitNPC(n, d) { 
+      this.createBloodEffect(n.x, n.y); 
+      this.playerMoney += 10; 
+      this.updateUI(); 
+      if (n.active) n.destroy(); 
+    }
+    
+    damageVehicle(v, d) {
+        if (!v || !v.active || v.isExploding) return;
+        if (!v.currentHealth) v.currentHealth = v.health || 100;
+        v.currentHealth -= d;
+        v.setTint(0xff6666);
+        this.time.delayedCall(300, () => { if (v.active) v.clearTint(); });
+        if (v.currentHealth < 30 && !v.isSmoking) {
+            v.isSmoking = true;
+            v.smokeEvent = this.time.addEvent({ delay: 200, callback: () => this.createSmokeEffect(v.x, v.y), loop: true, callbackScope: this });
+        }
+        if (v.currentHealth <= 0) this.explodeVehicle(v);
+    }
+    
+    hitVehicle(v, d) { this.damageVehicle(v, d); }
+
+    createExplosion(x, y) {
+        const e = this.add.circle(x, y, 30, 0xff4500).setAlpha(0.8);
+        this.tweens.add({ targets: e, scaleX: 2, scaleY: 2, alpha: 0, duration: 500, onComplete: () => e.destroy() });
+        this.npcs.children.each(n => { if (n.active && Phaser.Math.Distance.Between(x, y, n.x, n.y) < 100) this.hitNPC(n, 100); });
+        this.vehicles.forEach(v => { if (v.active && v !== this.currentVehicle && Phaser.Math.Distance.Between(x, y, v.x, v.y) < 100) this.hitVehicle(v, 50); });
+    }
+
+    updateUI() { const hP = Math.max(0, this.playerHealth / this.player.maxHealth); this.gameUI.healthBar.setScale(hP, 1); if (hP > 0.6) this.gameUI.healthBar.setFillStyle(0x00ff00); else if (hP > 0.3) this.gameUI.healthBar.setFillStyle(0xffff00); else this.gameUI.healthBar.setFillStyle(0xff0000); for (let i = 0; i < 5; i++) { this.gameUI.wantedStars[i].setColor(i < this.wantedLevel ? '#ff0000' : '#333333'); } this.gameUI.moneyText.setText(`$${this.playerMoney}`); const cO = this.playerInVehicle ? this.currentVehicle : this.player; const s = Math.round(cO.body.velocity.length()); this.gameUI.speedText.setText(this.playerInVehicle ? `${this.currentVehicle.type.replace('_', ' ').toUpperCase()} - Speed: ${s}` : 'ON FOOT'); this.gameUI.missionText.setText(this.currentMission && !this.currentMission.completed ? `MISSION: ${this.currentMission.description}` : 'No active missions'); const w = this.weapons[this.currentWeapon]; this.gameUI.weaponText.setText(`${w.name}: ${w.ammo}/${w.maxAmmo}`); this.updateMinimap(); }
+    updateMinimap() { const mS = 150; const wS = mS / Math.max(this.worldWidth, this.worldHeight); const { width } = this.sys.game.config; const pP = this.playerInVehicle ? this.currentVehicle : this.player; this.gameUI.minimapPlayer.setPosition((width - mS - 10) + (pP.x * wS) - mS / 2, (mS / 2 + 10) + (pP.y * wS) - mS / 2); }
+    update() { this.handleMovement(); this.updatePolice(); this.handleAutomaticFire(); this.checkMissionProgress(); this.updateUI(); this.updateDepthSorting(); }
+    handleAutomaticFire() { if (this.isAutoFiring && !this.playerInVehicle) { const w = this.weapons[this.currentWeapon]; if (w.automatic) { if (this.autoFireTarget) this.shoot(this.autoFireTarget.x, this.autoFireTarget.y); else this.shootForward(); } } }
+    handleMovement() { if (this.playerInVehicle) this.handleVehicleMovement(this.currentVehicle); else this.handlePlayerMovement(this.player); }
+    handlePlayerMovement(p) { let vX = 0, vY = 0; const s = 180; if (this.wasdKeys.W.isDown) vY = -s; if (this.wasdKeys.S.isDown) vY = s; if (this.wasdKeys.A.isDown) vX = -s; if (this.wasdKeys.D.isDown) vX = s; if (vX !== 0 && vY !== 0) { vX *= 0.707; vY *= 0.707; } p.body.setVelocity(vX, vY); if (vX !== 0 || vY !== 0) p.rotation = Math.atan2(vY, vX) + Math.PI / 2; }
+    handleVehicleMovement(v) { if (v.collisionCooldown) { v.body.setVelocity(0, 0).setAcceleration(0, 0); return; } const mS = v.maxSpeed || 280, a = v.acceleration || 300, tS = 3.0; const cS = v.body.velocity.length(); if (this.wasdKeys.W.isDown) this.physics.velocityFromRotation(v.rotation, a, v.body.acceleration); else if (this.wasdKeys.S.isDown) this.physics.velocityFromRotation(v.rotation, -a * 0.7, v.body.acceleration); else v.body.setAcceleration(0); if (cS > 20) { const tI = Math.min(cS / 100, 1); if (this.wasdKeys.A.isDown) v.rotation -= tS * 0.02 * tI; if (this.wasdKeys.D.isDown) v.rotation += tS * 0.02 * tI; } v.body.setDrag(this.wasdKeys.SPACE.isDown ? 800 : 150); if (cS > mS) v.body.velocity.normalize().scale(mS); }
+    
+    updatePolice() {
+        this.policeCars.forEach(pC => {
+            if (!pC.active) return;
+            if (this.wantedLevel > 0) {
+                const t = this.playerInVehicle ? this.currentVehicle : this.player;
+                const a = Phaser.Math.Angle.Between(pC.x, pC.y, t.x, t.y);
+                const d = Phaser.Math.Distance.Between(pC.x, pC.y, t.x, t.y);
+                this.physics.velocityFromRotation(a, d > 100 ? 200 + (this.wantedLevel * 40) : 300, pC.body.velocity);
+                pC.rotation = a;
+            } else {
+                pC.body.setVelocity(0, 0);
+            }
+        });
+    }
+
+    handleSimpleVehicleCollision(v1, v2, iP) {
+        const a = Phaser.Math.Angle.Between(v1.x, v1.y, v2.x, v2.y);
+        const tS = v1.body.velocity.length() + v2.body.velocity.length();
+        const bF = Math.min(tS * 0.5, 200);
+        v1.body.setVelocity(Math.cos(a + Math.PI) * bF, Math.sin(a + Math.PI) * bF);
+        v2.body.setVelocity(Math.cos(a) * bF, Math.sin(a) * bF);
+        if (tS > 100) {
+            this.damageVehicle(v1, Math.floor(tS / 50));
+            this.damageVehicle(v2, Math.floor(tS / 50));
+            if (v1 === this.currentVehicle || v2 === this.currentVehicle) this.damagePlayer(Math.floor(tS / 100));
+        }
+        if (iP && Math.random() < 0.5) this.increaseCrime("Rammed Police");
+        v1.collisionCooldown = true;
+        v2.collisionCooldown = true;
+        this.time.delayedCall(500, () => { if (v1.active) v1.collisionCooldown = false; if (v2.active) v2.collisionCooldown = false; });
+    }
+
+    damagePlayer(d) {
+        this.playerHealth = Math.max(0, this.playerHealth - d);
+        this.cameras.main.flash(200, 255, 0, 0, false);
+        if (this.playerHealth <= 0) this.gameOver();
+        this.updateUI();
+    }
+
+    createBloodEffect(x, y) {
+        const b = this.add.circle(x, y, 8, 0x8B0000).setAlpha(0.8).setDepth(1);
+        for (let i = 0; i < 5; i++) {
+            const s = this.add.circle(x + (Math.random() - 0.5) * 30, y + (Math.random() - 0.5) * 30, 2 + Math.random() * 3, 0x8B0000).setAlpha(0.6).setDepth(1);
+            this.time.delayedCall(5000, () => { if (s.active) s.destroy(); });
+        }
+        this.time.delayedCall(5000, () => { if (b.active) b.destroy(); });
+    }
+
+    createSmokeEffect(x, y) {
+        const s = this.add.circle(x, y, 5, 0x555555).setAlpha(0.5);
+        this.tweens.add({ targets: s, y: y - 20, alpha: 0, scaleX: 1.5, scaleY: 1.5, duration: 1000, onComplete: () => s.destroy() });
+    }
+
+    explodeVehicle(v) {
+        if (!v || v.isExploding) return;
+        v.isExploding = true;
+        
+        this.createExplosion(v.x, v.y);
+        
+        if (v === this.currentVehicle) { this.exitVehicle(); this.damagePlayer(50); }
+        const vI = this.vehicles.indexOf(v); if (vI > -1) this.vehicles.splice(vI, 1);
+        const pI = this.policeCars.indexOf(v); if (pI > -1) this.policeCars.splice(pI, 1);
+        if (v.isSmoking && v.smokeEvent) { v.smokeEvent.remove(false); v.isSmoking = false; }
+        
+        this.showNotification("VEHICLE DESTROYED!", '#ff0000');
+        
+        this.time.delayedCall(100, () => {
+             if (v.active) v.destroy();
+        });
+    }
+
+    gameOver() {
+        this.showNotification("WASTED!", '#ff0000');
+        this.sound.stopAll();
+
+        this.time.delayedCall(3000, () => {
+            this.playerHealth = 100;
+            this.wantedLevel = 0;
+            this.playerMoney = Math.max(0, this.playerMoney - 500);
+
+            if (this.playerInVehicle) {
+                this.exitVehicle(); 
+            } else {
+                if (!this.onFootMusic.isPlaying) this.onFootMusic.play();
+            }
+
+            this.player.setPosition(960, 960).body.setVelocity(0, 0);
+            this.player.setVisible(true);
+            this.policeCars.forEach(c => { const i = this.vehicles.indexOf(c); if (i > -1) this.vehicles.splice(i, 1); if (c.active) c.destroy(); });
+            this.policeCars = [];
+            this.weapons.forEach(w => { w.ammo = w.maxAmmo; });
+            this.currentWeapon = 0;
+            this.updateUI();
+            this.showNotification("Respawned at hospital - $500 fine", '#ffff00');
+        });
+    }
+}
