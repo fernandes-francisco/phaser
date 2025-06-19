@@ -619,7 +619,7 @@ export default class GameScene extends Phaser.Scene {
 
             setupControls() {
                 this.cursors = this.input.keyboard.createCursorKeys();
-                this.wasdKeys = this.input.keyboard.addKeys('W,S,A,D,E,SPACE,R,ESC,Q,F,ONE,TWO,THREE');
+                this.wasdKeys = this.input.keyboard.addKeys('W,S,A,D,E,SPACE,R,ESC,Q,F,ONE,TWO,THREE,G');
                 
                 // Vehicle interaction
                 this.wasdKeys.E.on('down', () => {
@@ -644,6 +644,11 @@ export default class GameScene extends Phaser.Scene {
                 this.wasdKeys.THREE.on('down', () => {
                     this.currentWeapon = 2;
                     this.updateUI();
+                });
+                
+                // TESTE: Tecla G para Game Over (temporário)
+                this.wasdKeys.G.on('down', () => {
+                    this.scene.start('GameOverScene');
                 });
                 
                 // Mouse shooting - hold for automatic fire

@@ -1,13 +1,9 @@
-
 export default class LoadingScene extends Phaser.Scene {
   constructor() {
     super('LoadingScene');
   }
 
   preload() {
-    // Carrega a imagem de fundo do loading
-    this.load.image('bgLoading', 'assets/background.png');
-
     // Barra de progresso
     const { width, height } = this.cameras.main;
     const barWidth = width * 0.6;
@@ -23,19 +19,47 @@ export default class LoadingScene extends Phaser.Scene {
   }
 
   create() {
-    // Exibe a imagem de fundo
     const { width, height } = this.cameras.main;
-    const bg = this.add.image(width/2, height/2, 'bgLoading')
-      .setScrollFactor(0);
-    const scaleX = width / bg.width;
-    const scaleY = height / bg.height;
-    bg.setScale(Math.max(scaleX, scaleY));
-
+    
     // Fade-in da tela de loading
     this.cameras.main.fadeIn(800, 0, 0, 0);
 
-    // Após 4 segundos, faz fade-out e inicia PreloadScene
-    this.time.delayedCall(4000, () => {
+    // Texto "Carregando" base
+    const loadingText = this.add.text(width/2, height/2 - 50, 'A carregar', {
+      fontSize: '32px',
+      fontFamily: 'Arial',
+      color: '#ffffff',
+      stroke: '#000',
+      strokeThickness: 3
+    });
+    loadingText.setOrigin(0.5);
+
+    // Texto dos pontos que vai animar
+    const dotsText = this.add.text(width/2 + 120, height/2 - 50, '', {
+      fontSize: '32px',
+      fontFamily: 'Arial',
+      color: '#ffffff',
+      stroke: '#000',
+      strokeThickness: 3
+    });
+    dotsText.setOrigin(0, 0.5);
+
+    // Animação dos pontos
+    let dots = '';
+    let dotCount = 0;
+    
+    this.time.addEvent({
+      delay: 500, // 500ms entre cada ponto
+      callback: () => {
+        dotCount = (dotCount + 1) % 4; // 0, 1, 2, 3, 0, 1, 2, 3...
+        dots = '.'.repeat(dotCount);
+        dotsText.setText(dots);
+      },
+      loop: true
+    });
+
+    // Após 3 segundos, faz fade-out e inicia PreloadScene
+    this.time.delayedCall(3000, () => {
       this.cameras.main.fadeOut(800, 0, 0, 0);
       this.cameras.main.once('camerafadeoutcomplete', () => {
         // Oculta o loading e exibe o container do jogo

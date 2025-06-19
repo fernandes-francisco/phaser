@@ -3,12 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GTA City - 2D Open World Game</title>
+    <title>Grand Theft Auto: Classic Chaos</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
     <script type="module" src="main.js"></script>
     <script type="module" src="preload.js"></script>
+    <script type="module" src="MenuScene.js"></script>
     <script type="module" src="GameScene.js"></script>
     <script type="module" src="LoadingScene.js"></script>
+    <script type="module" src="GameOverScene.js"></script>
     <style>
         * {
             margin: 0;
@@ -44,6 +46,7 @@
             margin-bottom: 20px;
             text-align: center;
             letter-spacing: 2px;
+            display: none;
         }
 
         #game-subtitle {
@@ -52,6 +55,7 @@
             margin-bottom: 30px;
             text-align: center;
             font-style: italic;
+            display: none;
         }
 
         #game-canvas {
@@ -181,10 +185,10 @@
 <body>
     
     <div id="game-container">
-        <h1 id="game-title">GTA CITY</h1>
-        <p id="game-subtitle">Open World Crime Simulator</p>
+        <h1 id="game-title">Grand Theft Auto</h1>
+        <p id="game-subtitle">Classic Chao</p>
         
-        <div id="loading">
+        <div id="loading" style="display: none;">
             <div class="loader"></div>
             <p class="loading-text">Loading Game Assets...</p>
             <p style="color: #ccc; margin-top: 10px;">Preparing your criminal adventure...</p>
@@ -217,7 +221,7 @@
             </div>
             
             <div id="game-description">
-                <strong style="color: #ff6b35;">🚗 Welcome to GTA City!</strong><br>
+                <strong style="color: #ff6b35;">🚗 Welcome to Grand Theft Auto: Classic Chao!</strong><br>
                 Explore the open world, steal cars, evade police, and complete missions. 
                 Your wanted level increases when you commit crimes - the more stars you have, 
                 the more aggressive the police become. Can you survive in this criminal underworld?

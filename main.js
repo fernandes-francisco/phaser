@@ -1,6 +1,8 @@
+import MenuScene from './MenuScene.js';
 import LoadingScene from './LoadingScene.js';
 import GameScene from './GameScene.js';
 import PreloadScene from './preload.js'
+import GameOverScene from './GameOverScene.js';
 const config = {
         type: Phaser.AUTO,
         width: Math.min(window.innerWidth * 0.85, 1200),
@@ -14,7 +16,7 @@ const config = {
                 debug: false
             }
         },
-        scene: [LoadingScene, PreloadScene, GameScene],
+        scene: [MenuScene, LoadingScene, PreloadScene, GameScene, GameOverScene],
     scale: {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH
