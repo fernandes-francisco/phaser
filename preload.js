@@ -18,7 +18,8 @@ export default class PreloadScene extends Phaser.Scene {
     this.load.image('road', 'assets/road.png');
     this.load.image('npc', 'assets/npc.png');
     this.load.audio('danzakuduro', 'assets/Don Omar - Danza Kuduro (Lyrics) ft. Lucenzo.mp3');
-    this.load.audio('sovietconnection', 'assets/GTA IV - Soviet Connection (New mixed Intro).mp3');
+    this.load.audio('sovietconnection', 'assets/Don Omar - Danza Kuduro (Lyrics) ft. Lucenzo.mp3');
+    //this.load.audio('sovietconnection', 'assets/GTA IV - Soviet Connection (New mixed Intro).mp3');
   }
 
   create() {

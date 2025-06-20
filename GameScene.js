@@ -685,7 +685,7 @@ export default class GameScene extends Phaser.Scene {
             return;
         }
         const speed = vehicle.body.velocity.length();
-        if (speed > 80) {
+        if (speed > 200) {
             const damage = Math.min(25, Math.floor(speed / 15));
             this.damagePlayer(damage);
             this.damageVehicle(vehicle, damage * 2);

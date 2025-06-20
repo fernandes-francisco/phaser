@@ -9,7 +9,7 @@ export default class GameOverScene extends Phaser.Scene {
             .setOrigin(0, 0);
 
         // Texto em vermelho (personalizável)
-        const gameOverText = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY - 100, 'Já Te Fod#!$%', {
+        const gameOverText = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY - 100, 'Já Te Fod#!$%!!!', {
             fontSize: '64px',
             fontFamily: 'Arial',
             color: '#ff0000',

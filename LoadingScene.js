@@ -24,7 +24,7 @@ export default class LoadingScene extends Phaser.Scene {
     // Fade-in da tela de loading
     this.cameras.main.fadeIn(800, 0, 0, 0);
 
-    // Texto "Carregando" base
+    // Texto "A carregar" base
     const loadingText = this.add.text(width/2, height/2 - 50, 'A carregar', {
       fontSize: '32px',
       fontFamily: 'Arial',
@@ -59,7 +59,7 @@ export default class LoadingScene extends Phaser.Scene {
     });
 
     // Após 3 segundos, faz fade-out e inicia PreloadScene
-    this.time.delayedCall(3000, () => {
+    this.time.delayedCall(5000, () => {
       this.cameras.main.fadeOut(800, 0, 0, 0);
       this.cameras.main.once('camerafadeoutcomplete', () => {
         // Oculta o loading e exibe o container do jogo
